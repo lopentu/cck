@@ -1,0 +1,66 @@
+# translation
+Ban Gu,班固
+Dong Zhong Shu,董仲舒
+Du You,杜佑,通典
+Huan Kuan,桓寬,鹽鐵論
+Jia Yi,賈誼,新書
+Jiao Yanshou,焦延壽,焦氏易林
+Jing Fang,京房,京氏易傳
+Li Si,李斯,諫逐客書
+Liang Qi Chao,梁啟超,墨經校釋
+Liu Xiang,劉向,說苑;新序;列女傳
+Liu Yi Qing,劉義慶,世說新語
+Lu Bu-wei,呂不韋
+Lu Sheng,魯勝,魯勝墨辯注敘
+Shen Dao,慎到,慎子
+Sima Qian,司馬遷
+Sun Wu,孫武,孫子兵法
+Sun Yi-Rang,孫詒讓,周禮政要;古籀拾遺;札迻;墨子閒詁;周書斠補
+Wang Bi,王弼,道德真經註
+Wang Chong,王充,論衡
+Wang Fu,王符,潛夫論
+Wu Qi,吳起,吳子
+Xu Gan,徐幹,中論
+Xu Shen,許慎,說文解字
+Yan Zhi Tui,顏之推
+Yang Xiong,揚雄
+Zhu Xi,朱熹
+[Chu]宏,袾宏,緇門崇行錄
+# courtesy name and art name
+鄭康成|鄭玄,
+墨翟|墨子,
+荀悅|荀悦,
+范甯|范宁,
+顏之推|顔之推,
+唐玄宗|李隆基,
+歐陽脩|歐陽修,
+陸游|陆游,
+朱熹|朱子,
+邱濬|丘濬,
+黃佐|黄佐,
+黃道周|黄道周,
+金聖歎|金人瑞,
+吳殳|吳喬,
+黃叔璥|黄叔璥,
+允祿|允禄,
+彭紹升|彭際清,
+郭嵩燾|郭嵩焘,
+王樹枬|王樹枏,
+
+# notes
+## different roles
+宋元.jsonl:{"urn": "wb929145", "title": "西山群仙會真記", "tag": "TIER2", "author": "施肩吾撰、李竦"
+施肩吾撰、李竦 -> ['施肩吾', '李竦']
+西山群仙會真記，唐洪州西山道士施肩吾撰，三仙門弟子李竦編集。
+
+清.jsonl:{"urn": "wb871603", "title": "李太白文集", "tag": "TIER2", "author": "李白著，王琦輯註"
+李白著，王琦輯註 -> ['李白', '王琦']
+
+明.jsonl:{"urn": "wb84764", "title": "道德經解", "tag": "TIER2", "author": "沈一貫、老子、沈一中、王道顯、徐憲成"
+沈一貫、老子、沈一中、王道顯、徐憲成 -> ['沈一貫', '老子', '沈一中', '王道顯', '徐憲成']
+
+## checklist
+原題 锺離權著呂喦傳 -> ['锺離權', '呂喦']
+原題司馬承禎述 -> ['司馬承禎']
+郭象註成玄英疏 -> ['郭象', '成玄英']
+題浣雲叟 -> ['浣雲叟']

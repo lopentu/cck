@@ -1,2 +1,3 @@
 from .vocab import Vocabulary
-from .utils import fp_lst, corpus_lst, Text, Author
+from .author import Author, match2time
+from .utils import dynaspan_lst, corpus_lst, Corpus, Text, select_spmat

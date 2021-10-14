@@ -2,13 +2,34 @@ from pathlib import Path
 import json
 from itertools import chain
 from tqdm.auto import tqdm
+import re
+import regex
 
-fp_lst = list(Path('../tiers/dynasty_split/').glob('*.jsonl'))
+BASEDIR_CORPUS = Path('../tiers/dynasty_split/')
 
-def corpus_lst():
-    corpus_lst = [open(fp, 'r', encoding='utf-8').readlines() for fp in tqdm(fp_lst)]
+PAT_CLEANTEXT_RE = re.compile(r'[^\u4e00-\u9fd5]')
+PAT_CLEANTEXT_REGEX = regex.compile(r'[^\p{Han}]')
+
+dynaspan_lst = '先秦,漢,魏晉南北,唐五代十國,宋元,明,清,民國'.split(',')
+
+def corpus_lst(dynaspan_lst=dynaspan_lst):
+    corpus_lst = [Corpus(dynaspan) for dynaspan in tqdm(dynaspan_lst)]
     return corpus_lst
 
+class Corpus:
+    def __init__(self, dynaspan=None, fp=None):
+        if dynaspan:
+            self.dynaspan = dynaspan
+            self.fp = BASEDIR_CORPUS / f'{dynaspan}.jsonl'
+        elif fp:
+            if isinstance(fp, str): fp = Path(fp)
+            self.fp = fp
+            self.dynaspan = fp.stem
+        else:
+            raise ValueError('Either <dynaspan> or <fp> needs to be given')
+
+    def read_corpus(self):
+        self.corpus = open(self.fp, 'r', encoding='utf-8').readlines()
 class Text:
     def __init__(self, line):
         self.obj = json.loads(line)
@@ -25,14 +46,16 @@ class Text:
                 texts.append(flatten)
         self.texts = texts
 
-class Author():
-    def __init__(self):
-        # self.roles = '輯;撰;傳;述;奉敕譯;註;注;編;著;輯註;箋;章句;疏'.split(';')
-        # self.names_excluded = '李心[傳];劉銘[傳];[傳]恒;[傳]遜;孔[傳]金;畢弘[述];陳文[述];崔[述];莊[述]祖'.split(';')
-        self.PAT_ROLES = '輯;撰;(?<!李心|劉銘)傳(?!恒|遜|金);(?<!畢弘|陳文)述(?!祖);奉敕譯;註;注;編;著;輯註;箋;章句;疏'.split(';')
-        # alt: 注註
-        # 《大學》、《中庸》中的註釋稱為「章句」，《論語》、《孟子》中的註釋集合了眾人說法，稱為「集注」。後人合稱其為「四書章句集注」，簡稱「四書集注」。
-        self.PAT_PREFIX = '原題( *);舊題( *);題( *)'.split(';')
+    def clean(self):
+        self.clean_texts = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.texts]
+
+SPMAT_BASEDIR = Path("../data/cooccur_mat/win3")
+def select_spmat(dynspan, winsize):
+    sp_path = SPMAT_BASEDIR / f"sparse_mat_{dynspan}_contextSize{winsize}.npz"
+    if sp_path.exists():
+        return sp_path
+    else:
+        raise FileNotFoundError()
 
 # cross_dynasty_urns = ['zhan-guo-ce', 'duduan', 'shan-hai-jing', 'er-ya', 'huangdi-neijing', 'kongcongzi', 'wenzi', 'guanzi', 'renwuzhi']
 
