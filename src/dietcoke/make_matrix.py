@@ -77,7 +77,7 @@ def apply_sauce(line):
         texts = Text(line).texts
         concords = (create_concords(text) for text in texts)
         line_mat_idx = [create_line_mat_idx(concord) for concord in concords]
-        line_mat_idx = np.concatenate(line_mat_idx, axis=1)
+        line_mat_idx = np.concatenate(line_mat_idx, axis=1) # coo, dok, poisson
 
         # line_mat_idx = sum_mat_idx(line_mat_idx[0,:], line_mat_idx[1,:], line_mat_idx[2,:])
         line_mat = sparse.csr_matrix(
