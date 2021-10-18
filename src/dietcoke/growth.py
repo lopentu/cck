@@ -2,10 +2,13 @@ from itertools import zip_longest
 from collections import Counter, defaultdict
 import pandas as pd
 import numpy as np
+from scipy import stats
 import statsmodels.formula.api as smf
+import statsmodels.api as sm
 import matplotlib.pyplot as plt
 import matplotlib
 import seaborn as sns
+from tqdm.auto import tqdm
 
 matplotlib.font_manager.fontManager.addfont('../../TaipeiSansTCBeta-Light.ttf')
 matplotlib.rc('font', family='Taipei Sans TC Beta')
@@ -94,7 +97,7 @@ class Growth():
         plt.ylabel('E[V(N)] - V(N)')
 
     def plot_vgc(self, vgc_df, figsize=(10, 5)):
-        plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize)
 
         plt.subplot(1, 2, 1)
         self.plot_vgc_curve(vgc_df)
@@ -102,14 +105,19 @@ class Growth():
         plt.subplot(1, 2, 2)
         self.plot_vgc_residuals(vgc_df)
 
-    def calc_char_freq_by_text_slice(self, char, moving_window=3):
+        fig.tight_layout(pad=3.0)
+
+    def calc_char_freq_by_text_slice(self, char, moving_window=3, return_df=True):
         if self.char_freq_by_text_slice is None:
             self.char_freq_by_text_slice = [Counter(text_slice) for text_slice in self.text_slices]
 
-        freq_lst = [n[char] for n in self.char_freq_by_text_slice]
-        df = pd.DataFrame({'text_slice': self.ntokens, 'freq': freq_lst})
-        df['running_median'] = df['freq'].rolling(moving_window, min_periods=1).median()
-        return df
+        freq_lst = [n.get(char, 0) for n in self.char_freq_by_text_slice]
+        if return_df:
+            df = pd.DataFrame({'text_slice': self.ntokens, 'freq': freq_lst})
+            df['running_median'] = df['freq'].rolling(moving_window, min_periods=1).median()
+            return df
+        else:
+            return freq_lst
 
     def plot_char_freq_by_text_slice(self, char, moving_window=3, s=5):
         df = self.calc_char_freq_by_text_slice(char, moving_window)
@@ -140,3 +148,116 @@ class Growth():
         plt.xlabel('k: text slice')
         plt.ylabel('D(k):\nProgressive difference error scores')
         plt.title('Error scores for the influx of new types')
+
+    def get_underdisperse_df(self):
+        d_lst = []
+        char_lst = []
+        for char in self.char_freq:
+            freq_lst = self.calc_char_freq_by_text_slice(char, return_df=False)
+            d = sum([1 for freq in freq_lst if freq > 0])
+            d_lst.append(d)
+            char_lst.append(char)
+            
+        zscore_lst = self.__get_zscore_lst(d_lst)
+        underdisperse_df = pd.DataFrame(
+            {'char': char_lst, 'd': d_lst, 'zscore': zscore_lst})
+        underdisperse_df['underdispersed'] = underdisperse_df['zscore'].apply(lambda x: abs(x) >= 3)
+        self.underdisperse_df = underdisperse_df
+
+        self.underdisperse_chars = self.underdisperse_df[self.underdisperse_df['underdispersed']]['char'].values
+        self.d = dict(zip(char_lst, d_lst))
+        return self.underdisperse_df
+
+    def __get_zscore_lst(self, lst):
+        zscore_lst = np.array(lst)
+        zscore_lst = zscore_lst.astype('float')
+        zscore_lst[zscore_lst == 0] = np.nan
+        zscore_lst = stats.zscore(zscore_lst, nan_policy='omit')
+        return zscore_lst
+
+    def calc_d_k_threshold(self):
+        d_k_threshold = {}
+        for char, freq in self.char_freq.items():
+            d = self.d.get(char, 0)
+            if d > 0:
+                d_k_threshold[char] = freq / d
+        self.d_k_threshold = d_k_threshold
+        return d_k_threshold
+
+    def is_d_k(self, char, d_k_threshold, f_k):
+        result = 0
+        if char in self.underdisperse_chars:
+            if d_k_threshold >= f_k:
+                result = 1
+        return result
+
+    def get_VU(self):
+        df_lst = []
+        for char in tqdm(self.underdisperse_chars):
+            df = self.calc_char_freq_by_text_slice(char)
+            df['VU_k'] = df.apply(lambda row: self.is_d_k(char, self.d_k_threshold.get(char, 0), row['freq']), axis=1) #
+            df['NU_k'] = df.apply(lambda row: row['VU_k'] * row['freq'], axis=1)
+            df_lst.append(df)
+
+        VU_df = pd.concat(df_lst)
+        VU_df = VU_df.drop(['freq', 'running_median'], axis=1) \
+                .rename({'text_slice': 'k'}, axis=1) \
+                .groupby('k').sum().reset_index()
+
+        VU_df['running_median_VU_k'] = VU_df['VU_k'].rolling(5, min_periods=1).median()
+        VU_df['running_median_NU_k'] = VU_df['NU_k'].rolling(5, min_periods=1).median()
+
+        VU_df['yhat_ls_VU_k'] = smf.ols(formula='VU_k ~ k', data=VU_df).fit().predict(VU_df[['k']])
+        VU_df['yhat_ls_NU_k'] = smf.ols(formula='NU_k ~ k', data=VU_df).fit().predict(VU_df[['k']])
+
+        self.VU_df = VU_df
+        return self.VU_df
+
+    def plot_U(self, U_var='VU'):
+        U_col = U_var + '_k'
+        plt.scatter(self.VU_df['k'], self.VU_df[U_col], s=5)
+        plt.plot(self.VU_df['k'], self.VU_df[f'running_median_{U_col}'])
+        plt.plot(self.VU_df['k'], self.VU_df[f'yhat_ls_{U_col}'], linestyle='dotted')
+        plt.xlabel('k: text slice')
+
+        if U_var == 'VU':
+            plt.ylabel(f'VU(k):\nnumber of underdispersed types')
+        elif U_var == 'NU':
+            plt.ylabel(f'NU(k):\nnumber of underdispersed tokens')
+        else:
+            raise
+
+    def plot_VU(self):
+        self.plot_U()
+
+    def plot_NU(self):
+        self.plot_U(U_var='NU')
+
+    def plot_U_acf(self, U_var='VU'):
+        U_col = U_var + '_k'
+
+        sm.graphics.tsa.plot_acf(self.VU_df[U_col].values)
+        plt.xlabel('Lag')
+        plt.ylabel('ACF')
+        plt.title(f'Series: {U_var}')
+
+    def get_Pr_type(self):
+        VU_df = self.VU_df
+
+        VU_df['VU_k_prev'] = VU_df['VU_k'].shift(1)
+        VU_df['VU_k_new'] = VU_df['VU_k'] - VU_df['VU_k_prev']
+
+        VU_df = self.vgc_df[['M', 'V']] \
+                .rename({'M': 'k', 'V': 'V_k'}, axis=1) \
+                .merge(VU_df)
+        VU_df['V_k_prev'] = VU_df['V_k'].shift(1)
+        VU_df['V_k_new'] = VU_df['V_k'] - VU_df['V_k_prev']
+
+        VU_df['Pr_k_type'] = VU_df['VU_k_new'] / VU_df['V_k_new']
+        self.VU_df = VU_df
+        return self.VU_df
+
+    def plot_Pr_type(self):
+        plt.scatter(self.VU_df['k'], self.VU_df['Pr_k_type'], s=5)
+        plt.xlabel('k: text slice')
+        plt.ylabel('Pr(U,type):\nproportion of new underdispersed types')
