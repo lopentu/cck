@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 import re
 import regex
 
-BASEDIR_CORPUS = Path('../tiers/dynasty_split/')
+BASEDIR_CORPUS = Path(__file__).parent / '../../data/dynasty_split/'
 
 PAT_CLEANTEXT_RE = re.compile(r'[^\u4e00-\u9fd5]')
 PAT_CLEANTEXT_REGEX = regex.compile(r'[^\p{Han}]')
@@ -29,7 +29,9 @@ class Corpus:
             raise ValueError('Either <dynaspan> or <fp> needs to be given')
 
     def read_corpus(self):
-        self.corpus = open(self.fp, 'r', encoding='utf-8').readlines()
+        with open(self.fp, 'r', encoding='utf-8') as fin:
+            self.corpus = fin.readlines()
+
 class Text:
     def __init__(self, line):
         self.obj = json.loads(line)
@@ -44,10 +46,20 @@ class Text:
             else:
                 flatten = list(chain.from_iterable(n['c']))
                 texts.append(flatten)
-        self.texts = texts
+        self.__raw_texts = texts
+
+    @property
+    def raw_text(self):
+        return self.__raw_texts
+
+    @property
+    def text(self):
+        if not hasattr(self, "clean_texts"):
+            self.clean()
+        return self.clean_texts
 
     def clean(self):
-        self.clean_texts = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.texts]
+        self.clean_texts = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.__raw_texts]
 
 SPMAT_BASEDIR = Path("../data/cooccur_mat/win3")
 def select_spmat(dynspan, winsize):

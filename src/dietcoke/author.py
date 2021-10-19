@@ -54,14 +54,6 @@ def match2time(match):
         year *= -1
     return year
 
-PATH_AUTHOR_TIME = Path('../data/mapping_author_time.pkl')
-if PATH_AUTHOR_TIME.exists():
-    with open(PATH_AUTHOR_TIME, 'rb') as f:
-        author_life = dict(pickle.load(f))
-else:
-    author_life = {}
-    print('No mapping for author and time')
-
 def author2time(author):
     return author_life.get(author, [-9999])
 
@@ -71,3 +63,12 @@ class Author():
         self.name_clean = clean(self.name)
         self.name_norm = normalize(self.name_clean)
         self.life = [author2time(n) for n in self.name_norm]
+
+if __name__ == "__main__":
+    PATH_AUTHOR_TIME = Path('../data/mapping_author_time.pkl')
+    if PATH_AUTHOR_TIME.exists():
+        with open(PATH_AUTHOR_TIME, 'rb') as f:
+            author_life = dict(pickle.load(f))
+    else:
+        author_life = {}
+        print('No mapping for author and time')

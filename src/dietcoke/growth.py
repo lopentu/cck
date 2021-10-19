@@ -10,8 +10,8 @@ import matplotlib
 import seaborn as sns
 from tqdm.auto import tqdm
 
-matplotlib.font_manager.fontManager.addfont('../../TaipeiSansTCBeta-Light.ttf')
-matplotlib.rc('font', family='Taipei Sans TC Beta')
+# matplotlib.font_manager.fontManager.addfont('../../TaipeiSansTCBeta-Light.ttf')
+# matplotlib.rc('font', family='Taipei Sans TC Beta')
 
 class Growth():
     def __init__(self, texts, chunk_size):
