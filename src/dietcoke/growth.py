@@ -24,6 +24,11 @@ class Growth():
         self.group_freq = None
         self.char_freq_by_text_slice = None
 
+        self.moving_window = 5
+
+    def change_moving_window(self, new_moving_window):
+        self.moving_window = new_moving_window
+
     def _get_text_slices(self):
         # source: https://docs.python.org/3/library/itertools.html
         iterable = self.texts
@@ -108,7 +113,7 @@ class Growth():
 
         fig.tight_layout(pad=3.0)
 
-    def calc_char_freq_by_text_slice(self, char, moving_window=5, return_df=True):
+    def calc_char_freq_by_text_slice(self, char, return_df=True):
         if self.char_freq_by_text_slice is None:
             self.char_freq_by_text_slice = [Counter(text_slice) for text_slice in self.text_slices]
 
@@ -119,16 +124,16 @@ class Growth():
         else:
             return freq_lst
 
-    def plot_char_freq_by_text_slice(self, char, moving_window=5, s=5):
-        df = self.calc_char_freq_by_text_slice(char, moving_window)
+    def plot_char_freq_by_text_slice(self, char, s=5):
+        df = self.calc_char_freq_by_text_slice(char)
         plt.scatter(df['text_slice'], df['freq'], s=s)
         self._plot_w_ref_line(df, 'text_slice', 'freq', ['running_median'])
         plt.xlabel('text slice')
         plt.ylabel('frequency')
         plt.title(f'Word usage of {char}\n(TS smoother using running medians)')
 
-    def _add_running_median(self, df, x_var, y_var, moving_window=5):
-        df[f'running_median_{y_var}'] = df[y_var].rolling(moving_window, min_periods=1).median()
+    def _add_running_median(self, df, x_var, y_var):
+        df[f'running_median_{y_var}'] = df[y_var].rolling(self.moving_window, min_periods=1).median()
         plt.plot(df[x_var], df[f'running_median_{y_var}'], linestyle='dotted')
 
     def _add_ls_yhat(self, df, x_var, y_var):
