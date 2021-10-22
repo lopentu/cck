@@ -1,9 +1,11 @@
 from pathlib import Path
 import json
 from itertools import chain
+from collections import defaultdict
 from tqdm.auto import tqdm
 import re
 import regex
+from .author import Author
 
 BASEDIR_CORPUS = Path('../tiers/dynasty_split/')
 
@@ -16,20 +18,6 @@ def corpus_lst(dynaspan_lst=dynaspan_lst):
     corpus_lst = [Corpus(dynaspan) for dynaspan in tqdm(dynaspan_lst)]
     return corpus_lst
 
-class Corpus:
-    def __init__(self, dynaspan=None, fp=None):
-        if dynaspan:
-            self.dynaspan = dynaspan
-            self.fp = BASEDIR_CORPUS / f'{dynaspan}.jsonl'
-        elif fp:
-            if isinstance(fp, str): fp = Path(fp)
-            self.fp = fp
-            self.dynaspan = fp.stem
-        else:
-            raise ValueError('Either <dynaspan> or <fp> needs to be given')
-
-    def read_corpus(self):
-        self.corpus = open(self.fp, 'r', encoding='utf-8').readlines()
 class Text:
     def __init__(self, line):
         self.obj = json.loads(line)
@@ -48,6 +36,79 @@ class Text:
 
     def clean(self):
         self.clean_texts = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.texts]
+
+class Corpus:
+    def __init__(self, dynaspan=None, fp=None):
+        if dynaspan:
+            self.dynaspan = dynaspan
+            self.fp = BASEDIR_CORPUS / f'{dynaspan}.jsonl'
+        elif fp:
+            if isinstance(fp, str): fp = Path(fp)
+            self.fp = fp
+            self.dynaspan = fp.stem
+        else:
+            raise ValueError('Either <dynaspan> or <fp> needs to be given')
+
+    def read_corpus(self):
+        corpus = []
+        f = open(self.fp, 'r', encoding='utf-8')
+        line_id = 0
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            try:
+                corpus.append(Text(line))
+            except:
+                print(f'Unable to read line {line_id}')
+            line_id += 1
+        self.corpus = corpus
+
+    def get_author_time_lookup(self, save_lookup=False):
+        lookup_fp = Path('../data/author_time/year_lineid_lookup.json')
+        if lookup_fp.exists():
+            print('Reading existing lookup file...')
+            with open(lookup_fp, 'r', encoding='utf-8') as f:
+                self.author_time_lookup = json.load(f)
+
+        if not hasattr(self, 'author_time_lookup'):
+            authors = [line.author for line in self.corpus]
+            rep_years = [(i+1, Author(author).rep_year) for i, author in enumerate(authors)]
+
+            rep_years = sorted(rep_years, key=lambda x: x[1])
+            rep_dic = defaultdict(list)
+            for i, rep_year in rep_years:
+                rep_dic[rep_year].append(i)
+            self.author_time_lookup = dict(rep_dic)
+
+        if save_lookup:
+            with open(lookup_fp, 'w', encoding='utf-8') as f:
+                json.dump(self.author_time_lookup, f, ensure_ascii=False, indent=2)
+            print('File saved:', lookup_fp)
+
+        return self.author_time_lookup
+
+    def get_author_time_corpus(self):
+        if not hasattr(self, 'author_time_lookup'):
+            self.get_author_time_lookup()
+
+        author_time_corpus = {}
+        for rep_year, i_lst in self.author_time_lookup.items():
+            author_time_corpus[rep_year] = [self.corpus[i] for i in i_lst]
+        self.author_time_corpus = author_time_corpus
+        return self.author_time_corpus
+
+    def check_author_time(self):
+        error = None
+        for rep_year, line_lst in self.author_time_corpus.items():
+            for line in line_lst:
+                if Author(line.author).rep_year != int(rep_year):
+                    print(rep_year)
+                    print('Not matched', (line.obj['title'], line.urn, line.author, Author(line.author).rep_year))
+                    error = True
+        
+        if error is None:
+            print('Done checking ...')
 
 SPMAT_BASEDIR = Path("../data/cooccur_mat/win3")
 def select_spmat(dynspan, winsize):
