@@ -44,31 +44,36 @@ else:
 class Author():
     def __init__(self, name):
         # <name> is a string that can contain several author names
-        self.name = name
+        self.__name = name
         self.name_clean = self.clean()
         self.name_norm = self.normalize()
 
-        self.get_author2time()
-        self.get_rep_year()
+        self.author_time = self.get_author2time()
+        self.rep_year = self.get_rep_year(select_year='mid_year')
+
+    @property
+    def name(self):
+        return self.__name
 
     def clean(self, check_mode=False):
-        if self.name == '':
-            name_cleaned = self.name
+        if self.__name == '':
+            name_cleaned = self.__name
         else:
-            names_ori = re.findall(PAT_names_excluded, self.name)
+            names_ori = re.findall(PAT_names_excluded, self.__name)
             names_protect = (re.sub(PAT_roles, r'<<\1>>', n) for n in names_ori)
 
+            name = self.__name
             for name_ori, name_protect in zip(names_ori, names_protect):
-                self.name = re.sub(name_ori, name_protect, self.name)
+                name = re.sub(name_ori, name_protect, self.__name)
             
-            name_replaced = re.sub('([^<])'+PAT_roles, r'\1;', self.name).split(';')
+            name_replaced = re.sub('([^<])'+PAT_roles, r'\1;', name).split(';')
             name_replaced = [re.sub(PAT_prefix, '', n) for n in name_replaced]
             name_split = [re.split('、|，|；', n) for n in name_replaced]
             name_unprotect = [re.sub('<|>', '', n) for m in name_split for n in m]
             name_cleaned = [n for n in name_unprotect if n != '']
 
         if check_mode:
-            print(self.name, '->', name_cleaned)
+            print(self.__name, '->', name_cleaned)
         return name_cleaned
 
     def normalize(self, in_simplified=True):

@@ -7,7 +7,7 @@ import re
 import regex
 from .author import Author
 
-BASEDIR_CORPUS = Path('../tiers/dynasty_split/')
+BASEDIR_CORPUS = Path(__file__).parents[3] / '../dynasty_split/'
 
 PAT_CLEANTEXT_RE = re.compile(r'[^\u4e00-\u9fd5]')
 PAT_CLEANTEXT_REGEX = regex.compile(r'[^\p{Han}]')
@@ -25,17 +25,27 @@ class Text:
         self.author = self.obj['author']
 
         # self.texts = [n['c'] for n in obj['text']]
-        texts = []
+        text = []
         for n in self.obj['text']:
             if isinstance(n['c'], str):
-                texts.append(n['c'])
+                text.append(n['c'])
             else:
                 flatten = list(chain.from_iterable(n['c']))
-                texts.append(flatten)
-        self.texts = texts
+                text.append(flatten)
+        self.__raw_text = text
+
+    @property
+    def raw_text(self):
+        return self.__raw_text
+
+    @property
+    def text(self):
+        if not hasattr(self, 'clean_text'):
+            self.clean()
+        return self.clean_text
 
     def clean(self):
-        self.clean_texts = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.texts]
+        self.clean_text = [regex.sub(PAT_CLEANTEXT_REGEX, '', text) for text in self.__raw_text]
 
 class Corpus:
     def __init__(self, dynaspan=None, fp=None):
@@ -65,21 +75,21 @@ class Corpus:
         self.corpus = corpus
 
     def get_author_time_lookup(self, save_lookup=False):
-        lookup_fp = Path('../data/author_time/year_lineid_lookup.json')
-        if lookup_fp.exists():
-            print('Reading existing lookup file...')
-            with open(lookup_fp, 'r', encoding='utf-8') as f:
-                self.author_time_lookup = json.load(f)
-
+        lookup_fp = Path(f'../data/author_time/year_lineid_lookup_{self.dynaspan}.json')
         if not hasattr(self, 'author_time_lookup'):
-            authors = [line.author for line in self.corpus]
-            rep_years = [(i+1, Author(author).rep_year) for i, author in enumerate(authors)]
+            if lookup_fp.exists():
+                print('Reading existing lookup file...')
+                with open(lookup_fp, 'r', encoding='utf-8') as f:
+                    self.author_time_lookup = json.load(f)
+            else:
+                authors = [line.author for line in self.corpus]
+                rep_years = [(i, Author(author).rep_year) for i, author in enumerate(authors)]
 
-            rep_years = sorted(rep_years, key=lambda x: x[1])
-            rep_dic = defaultdict(list)
-            for i, rep_year in rep_years:
-                rep_dic[rep_year].append(i)
-            self.author_time_lookup = dict(rep_dic)
+                rep_years = sorted(rep_years, key=lambda x: x[1])
+                rep_dic = defaultdict(list)
+                for i, rep_year in rep_years:
+                    rep_dic[rep_year].append(i)
+                self.author_time_lookup = dict(rep_dic)
 
         if save_lookup:
             with open(lookup_fp, 'w', encoding='utf-8') as f:

@@ -1,5 +1,6 @@
 from itertools import zip_longest
 from collections import Counter, defaultdict
+import re
 import pandas as pd
 import numpy as np
 from scipy import stats
@@ -14,187 +15,284 @@ matplotlib.font_manager.fontManager.addfont('../../TaipeiSansTCBeta-Light.ttf')
 matplotlib.rc('font', family='Taipei Sans TC Beta')
 
 class Growth():
-    def __init__(self, texts, chunk_size):
-        self.texts = texts
-        self.chunk_size = chunk_size
+    def __init__(self, text, chunk_size):
+        self.moving_window = 5
+
+        self.__text = text
+        self.__chunk_size = chunk_size
 
         self._calc_char_freq()
-        self._get_text_slices()
-
-        self.group_freq = None
-        self.char_freq_by_text_slice = None
-
-        self.moving_window = 5
 
     def change_moving_window(self, new_moving_window):
         self.moving_window = new_moving_window
 
-    def _get_text_slices(self):
+    @property
+    def text(self):
+        return self.__text
+
+    @property
+    def chunk_size(self):
+        return self.__chunk_size
+
+    def _calc_char_freq(self):
+        self.char_freq = Counter(self.__text)
+        self.V = len(set(self.__text))
+        self.N = len(self.__text)
+
+    def _calc_group_freq(self):
+        group_freq = defaultdict(list)
+        for char, freq in self.char_freq.items():
+            group_freq[freq].append(char)
+        self.group_freq = group_freq
+        return self.group_freq
+
+    @property
+    def get_group_freq(self):
+        if not hasattr(self, 'group_freq'):
+            self._calc_group_freq()
+        return self.group_freq
+
+    @property
+    def get_freq_freq(self):
+        if not hasattr(self, 'freq_freq'):
+            self._calc_group_freq()
+            self.freq_freq = {freq: len(char_lst) for freq, char_lst in self.group_freq.items()}
+        return self.freq_freq
+
+    def _add_running_median(self, df, x_var, y_var):
+        df[f'running_median_{y_var}'] = df[y_var].rolling(self.moving_window, min_periods=1).median()
+
+        plt.plot(df[x_var], df[f'running_median_{y_var}'], linestyle='dotted')
+
+    def _add_ls_line(self, df, x_var, y_var):
+        est = smf.ols(formula=f'{y_var} ~ {x_var}', data=df).fit()
+        df[f'yhat_ls_{y_var}'] = est.predict(df[[x_var]])
+
+        plt.plot(x_var, f'yhat_ls_{y_var}', data=df, linestyle='dotted')
+        print(est.summary())
+
+    def _add_scatterplot_smoother(self, df, x_var, y_var, hide_scatter=False):
+        if hide_scatter:
+            sns.regplot(x_var, y_var, data=df, lowess=True,
+        line_kws={'ls': 'dashed'}, scatter_kws={'s': 5, 'alpha': 0})
+        else:
+            sns.regplot(x_var, y_var, data=df, lowess=True,
+        line_kws={'ls': 'dashed'}, scatter_kws={'s': 5})
+
+    def _plot_w_ref_line(self, df, x_var, y_var, ref, hide_scatter=False):
+        if 'ls' in ref:
+            self._add_ls_line(df, x_var, y_var)
+        if 'scatterplot_smoother' in ref:
+            self._add_scatterplot_smoother(df, x_var, y_var, hide_scatter=hide_scatter)
+        if 'running_median' in ref:
+            self._add_running_median(df, x_var, y_var)
+
+    def get_text_slices(self, iterable=None, drop_last=False):
         # source: https://docs.python.org/3/library/itertools.html
-        iterable = self.texts
-        n = self.chunk_size
+        if iterable is None:
+            iterable = self.__text
+        n = self.__chunk_size
 
         args = [iter(iterable)] * n
         text_slices = zip_longest(*args, fillvalue='')
-        text_slices = [''.join(char_lst) for char_lst in text_slices]
 
-        self.text_slices = text_slices#[1:]
-        self.nchunks = len(self.text_slices)
-        self.ntokens_start = [i*self.chunk_size for i in range(self.nchunks)]
-        self.ntokens_end = [(i+1)*self.chunk_size for i in range(self.nchunks)]
-        return self.text_slices
+        for k, text_slice in enumerate(text_slices):
+            if drop_last and text_slice[-1] == '':
+                break
+            yield k, text_slice
 
-    def _calc_char_freq(self):
-        self.char_freq = Counter(self.texts)
-        self.V = len(self.char_freq)
-        self.N = len(self.texts)
+    def get_char_occ(self, text_slice, char):
+        occs = []
+        offset = -1
+        while True:
+            try:
+                offset = text_slice.index(char, offset+1)
+                occs.append(offset)
+            except ValueError:
+                break
+        return occs
 
-    def _calc_group_freq(self):
-        if self.group_freq is None:
-            group_freq = defaultdict(list)
-            for char, freq in self.char_freq.items():
-                group_freq[freq].append(char)
+    def calc_char_freq_by_text_slice(self, char, return_df=True):
+        k_freq = [(k, np.log1p(len(self.get_char_occ(text_slice, char)))) for k, text_slice in self.get_text_slices()]
 
-            self.group_freq = group_freq
-            self.freq_freq = {freq: len(char_lst) for freq, char_lst in self.group_freq.items()}
-        return self.group_freq
+        if return_df:
+            df = pd.DataFrame(k_freq)
+            df.columns = ('k', 'freq')
 
-    def _calc_expected_V(self, text_slice_idx, return_all=True):
-        # formula (1)
-        self._calc_group_freq()
-
-        text_slice_cum = ''.join(self.text_slices[:text_slice_idx+1])
-        N = len(text_slice_cum)
-
-        freq_freq_sum = sum([freq*((1-(N/self.N))**freq_group) for freq_group, freq in self.freq_freq.items()])
-        expected_V = self.V - freq_freq_sum
-
-        M = N-self.chunk_size
-        V = len(Counter(text_slice_cum))
-
-        if return_all:
-            return [M, N, V, expected_V, freq_freq_sum]
+            df['freq_prev'] = df['freq'].shift(1, fill_value=np.log1p(0))
+            df['freq_diff'] = df['freq'] - df['freq_prev']
+            
+            return df
         else:
-            return expected_V
+            return k_freq
+
+    def plot_char_freq_by_text_slice(self, char, show_change=True, s=5):
+        df = self.calc_char_freq_by_text_slice(char)
+
+        if show_change:
+            df.set_index('k')['freq_diff'].plot()
+            plt.ylabel('frequency change')
+        else:
+            df.set_index('k')['freq'].plot()
+            plt.ylabel('frequency')
+
+        plt.xlabel('text slice')
+        plt.title(f'Word usage of {char}')
+
+    def _calc_expected_V(self):
+        expected_V_lst = []
+        for k, _ in self.get_text_slices():
+            N = (k+1) * self.__chunk_size
+            freq_freq_sum = sum([freq*((1-(N/self.N))**freq_group) for freq_group, freq in self.get_freq_freq.items()])
+            expected_V = self.V - freq_freq_sum
+            expected_V_lst.append(expected_V)
+        self.expected_V = expected_V_lst
+        return self.expected_V
+
+    @property
+    def get_expected_V(self):
+        if not hasattr(self, 'expected_V'):
+            self._calc_expected_V()
+        return self.expected_V
+
+    def calc_chunked_V(self, iterable=None, prevV=set()):
+        if iterable is None:
+            iterable = self.__text
+            is_ori_text = True
+        else:
+            is_ori_text = False
+
+        Vset = set() | prevV
+        xs = []
+        ys = []
+        for i, chunk in self.get_text_slices(iterable=iterable):
+            xs.append(i)
+            Vset |= set(chunk)
+            ys.append(len(Vset))
+
+        if is_ori_text:
+            self.chunked_V = ys
+
+        return (xs, ys, Vset)
+
+    @property
+    def get_chunked_V(self):
+        if not hasattr(self, 'chunked_V'):
+            self.calc_chunked_V()
+        return self.chunked_V
 
     def get_vgc(self):
-        data = []
-        for i in range(self.nchunks):
-            try:
-                data.append(self._calc_expected_V(i))
-            except:
-                print(i)
-
-        df = pd.DataFrame(data, columns=['M', 'N', 'V', 'expected_V', 'freq_freq_sum'])
-        df['diff_V'] = df['expected_V'] - df['V']
-        self.vgc_df = df
+        if not hasattr(self, 'vgc_df'):
+            BASE_DF = pd.DataFrame({
+                'N': [k*self.__chunk_size for k,_ in self.get_text_slices()],
+                'expected_V': self.get_expected_V,
+                'chunked_V': self.get_chunked_V,
+            })
+            BASE_DF['V_diff'] = BASE_DF['expected_V'] - BASE_DF['chunked_V']
+            self.vgc_df = BASE_DF
         return self.vgc_df
 
-    def plot_vgc_curve(self, vgc_df, color_expected_V='red'):
-        plt.plot(vgc_df['N'], vgc_df['expected_V'], c=color_expected_V)
-        plt.plot(vgc_df['N'], vgc_df['V'], linestyle='dotted')
+    def plot_vgc_curve(self, vgc_df):
+        vgc_df.set_index('N')[['expected_V', 'chunked_V']].plot()
+
         plt.xlabel('N')
-        plt.ylabel('V(N): dotted, E[V(N)]: solid')
+        plt.ylabel('V(N), E[V(N)]')
 
     def plot_vgc_residuals(self, vgc_df):
-        plt.plot(vgc_df['N'], vgc_df['diff_V'], linestyle='dotted', marker='o', markersize=2.5)
         plt.axhline(y=0, linestyle='-', color='gray')
+        vgc_df.set_index('N')['V_diff'].plot(style='.-')
+
         plt.xlabel('N')
         plt.ylabel('E[V(N)] - V(N)')
 
     def plot_vgc(self, vgc_df, figsize=(10, 5)):
-        fig = plt.figure(figsize=figsize)
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=figsize)
+        vgc_df.set_index('N')[['expected_V', 'chunked_V']].plot(ax=axes[0])
+        vgc_df.set_index('N')['V_diff'].plot(style='.-', ax=axes[1])
+        plt.axhline(y=0, linestyle='-', color='gray')
+        fig.tight_layout(pad=3.0)
 
-        plt.subplot(1, 2, 1)
-        self.plot_vgc_curve(vgc_df)
+    def get_prog_err_scores_df(self):
+        if not hasattr(self, 'prog_err_scores_df'):
+            df = self.get_vgc()
+            df['chunked_V_prev'] = df['chunked_V'].shift(1, fill_value=0)
+            df['expected_V_prev'] = df['expected_V'].shift(1, fill_value=0)
+            df['prog_err_score'] = (df['expected_V'] - df['expected_V_prev']) - (df['chunked_V'] - df['chunked_V_prev'])
 
-        plt.subplot(1, 2, 2)
-        self.plot_vgc_residuals(vgc_df)
+            min_val = df['prog_err_score'].min()
+            df['prog_err_score_log'] = df['prog_err_score'].apply(lambda x: np.log1p(x-min_val))
+
+            self.min_prog_err_score = min_val
+            self.prog_err_scores_df = df
+        return [self.min_prog_err_score, self.prog_err_scores_df]
+
+    def plot_prog_err_scores(self, min_val, prog_err_scores_df):
+        fig = plt.figure(figsize=(10, 5))
+
+        ax1 = plt.subplot(1, 2, 1)
+        plt.axhline(y=np.log1p(0-min_val), color='gray')
+        plt.scatter(prog_err_scores_df['N'], prog_err_scores_df['prog_err_score_log'], s=5, alpha=0.5)
+        plt.setp(ax1.get_yticklabels())
+
+        ax2 = plt.subplot(1, 2, 2, sharey=ax1)
+        plt.axhline(y=np.log1p(0-min_val), color='gray')
+        self._plot_w_ref_line(prog_err_scores_df, 'N', 'prog_err_score_log', ref=['ls', 'scatterplot_smoother'], hide_scatter=True)
 
         fig.tight_layout(pad=3.0)
 
-    def calc_char_freq_by_text_slice(self, char, return_df=True):
-        if self.char_freq_by_text_slice is None:
-            self.char_freq_by_text_slice = [Counter(text_slice) for text_slice in self.text_slices]
-
-        freq_lst = [cnt.get(char, 0) for cnt in self.char_freq_by_text_slice]
-        if return_df:
-            df = pd.DataFrame({'text_slice': self.ntokens_end, 'freq': freq_lst})
-            return df
-        else:
-            return freq_lst
-
-    def plot_char_freq_by_text_slice(self, char, s=5):
-        df = self.calc_char_freq_by_text_slice(char)
-        plt.scatter(df['text_slice'], df['freq'], s=s)
-        self._plot_w_ref_line(df, 'text_slice', 'freq', ['running_median'])
-        plt.xlabel('text slice')
-        plt.ylabel('frequency')
-        plt.title(f'Word usage of {char}\n(TS smoother using running medians)')
-
-    def _add_running_median(self, df, x_var, y_var):
-        df[f'running_median_{y_var}'] = df[y_var].rolling(self.moving_window, min_periods=1).median()
-        plt.plot(df[x_var], df[f'running_median_{y_var}'], linestyle='dotted')
-
-    def _add_ls_yhat(self, df, x_var, y_var):
-        est = smf.ols(formula=f'{y_var} ~ {x_var}', data=df).fit()
-        df[f'yhat_ls_{y_var}'] = est.predict(df[[x_var]])
-        return df
-
-    def _add_ls_line(self, df, x_var, y_var):
-        df = self._add_ls_yhat(df, x_var, y_var)
-        plt.plot(x_var, f'yhat_ls_{y_var}', data=df, linestyle='dotted')
-
-    def _add_scatterplot_smoother(self, df, x_var, y_var):
-        sns.regplot(x_var, y_var, data=df, lowess=True,
-        line_kws={'ls': 'dashed'}, scatter_kws={'s': 5})
-
-    def _plot_w_ref_line(self, df, x_var, y_var, ref):
-        if 'ls' in ref:
-            self._add_ls_line(df, x_var, y_var)
-        if 'scatterplot_smoother' in ref:
-            self._add_scatterplot_smoother(df, x_var, y_var)
-        if 'running_median' in ref:
-            self._add_running_median(df, x_var, y_var)
-
-    def get_prog_err_scores_df(self):
-        if not hasattr(self, 'vgc_df'):
-            raise ValueError('<vgc_df> does not exists.')
-
-        df = self.vgc_df
-        df['V_prev'] = df['V'].shift(1, fill_value=0)
-        df['expected_V_prev'] = df['expected_V'].shift(1, fill_value=0)
-        df['prog_err_score'] = (df['expected_V'] - df['expected_V_prev']) - (df['V'] - df['V_prev'])
-
-        self.prog_err_scores_df = df
-        return self.prog_err_scores_df
-        # est.params['M'], est.pvalues['M']
-
-    def plot_prog_err_scores(self, prog_err_scores_df):
-        plt.axhline(y=0, color='gray')
-        self._plot_w_ref_line(prog_err_scores_df, 'N', 'prog_err_score', ref=['ls', 'scatterplot_smoother'])
         plt.xlabel('k: text slice')
         plt.ylabel('D(k):\nProgressive difference error scores')
-        plt.title('Error scores for the influx of new types')
+        plt.suptitle('Error scores for the influx of new types')
 
-    def get_underdisperse_df(self):
-        d_lst = []
-        char_lst = []
-        for char in self.char_freq:
-            freq_lst = self.calc_char_freq_by_text_slice(char, return_df=False)
-            d = sum([1 for freq in freq_lst if freq > 0])
-            d_lst.append(d)
-            char_lst.append(char)
-        zscore_lst = self.__get_zscore_lst(d_lst)
+    def calc_dispersion(self):
+        cnt = {}
+        for k, text_slice in tqdm(self.get_text_slices()):
+            cnt[k] = Counter(''.join(text_slice))
 
-        underdisperse_df = pd.DataFrame(
-            {'char': char_lst, 'd': d_lst, 'zscore': zscore_lst})
-        underdisperse_df['is_underdispersed'] = underdisperse_df['zscore'].apply(lambda x: abs(x) >= 2.57)
-        self.underdisperse_df = underdisperse_df
+        df = pd.DataFrame(cnt).fillna(0)
+        df['d'] = (df != 0).sum(axis=1)
+        df = df.rename_axis('char').reset_index()
 
-        self.underdisperse_chars = self.underdisperse_df[self.underdisperse_df['is_underdispersed']]['char'].values
-        self.d = dict(zip(char_lst, d_lst))
-        return self.underdisperse_df
+        df['d_zscore'] = self.__get_zscore_lst(df['d'])
+        df['is_underdispersed'] = df['d_zscore'].apply(lambda x: 1 if abs(x) >= 2.57 else 0)
+        df['is_overdispersed'] = df['d_zscore'].apply(lambda x: 1 if x >= 2.57 else 0)
+        df['d_f_threshold'] = df.apply(lambda row: self.char_freq.get(row['char'], 0) / row['d'], axis=1)
+
+        self.disperse_df = df
+        self.disperse = dict(zip(df['char'], df['d']))
+        self.d_f_threshold = dict(zip(df['char'], df['d_f_threshold']))
+        self.underdisperse_chars = df[df['is_underdispersed'] == 1]['char'].to_list()
+        self.overdisperse_chars = df[df['is_overdispersed'] == 1]['char'].to_list()
+
+    @property
+    def get_disperse_df(self):
+        if not hasattr(self, 'disperse_df'):
+            self.calc_dispersion()
+        return self.disperse_df
+
+    @property
+    def get_disperse(self):
+        if not hasattr(self, 'disperse'):
+            self.calc_dispersion()
+        return self.disperse
+
+    @property
+    def get_underdisperse_chars(self):
+        if not hasattr(self, 'underdisperse_chars'):
+            self.calc_dispersion()
+        return self.underdisperse_chars
+
+    @property
+    def get_overdisperse_chars(self):
+        if not hasattr(self, 'overdisperse_chars'):
+            self.calc_dispersion()
+        return self.overdisperse_chars
+
+    @property
+    def get_d_f_threshold(self):
+        if not hasattr(self, 'd_f_threshold'):
+            self.calc_dispersion()
+        return self.d_f_threshold
 
     def __get_zscore_lst(self, lst):
         zscore_lst = np.array(lst)
@@ -203,115 +301,123 @@ class Growth():
         zscore_lst = stats.zscore(zscore_lst, nan_policy='omit')
         return zscore_lst
 
-    def get_d_f_threshold(self):
-        d_f_threshold = {}
-        for char, freq in self.char_freq.items():
-            d = self.d.get(char, 0)
-            if d > 0:
-                d_f_threshold[char] = freq / d
-            else:
-                print(f'{char} has dispersion of 0!?')
-        self.d_f_threshold = d_f_threshold
-        return d_f_threshold
+    def get_U(self):
+        if not hasattr(self, 'U'):
+            k_cols = [col for col in self.get_disperse_df.columns if isinstance(col, int)]
+            df = self.get_disperse_df[k_cols]
 
-    def calc_d_k_indicator(self, char, f_k):
-        if not hasattr(self, 'd_f_threshold'):
-            raise ValueError('<d_f_threshold> does not exists.')
+            freq_mat = np.array(df)
+            underdisperse_mat = np.array(self.get_disperse_df['is_underdispersed']).reshape(-1, 1)
+            threshold_mat = np.array(self.get_disperse_df['d_f_threshold']).reshape(-1, 1)
 
-        result = 0
-        if (char in self.underdisperse_chars) and \
-            (char in self.d_f_threshold):
-            if self.d_f_threshold[char] >= f_k:
-                result = 1
-        return result
+            indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat
+            freq_indicator_mat = freq_mat * indicator_mat
 
-    def get_U_df(self):
-        df_lst = []
-        for char in tqdm(self.underdisperse_chars): #
-            df = self.calc_char_freq_by_text_slice(char)
-            df['VU_k'] = df.apply(lambda row: self.calc_d_k_indicator(char, row['freq']), axis=1)
-            df['NU_k'] = df.apply(lambda row: row['VU_k'] * row['freq'], axis=1)
-            df['char'] = char
-            df_lst.append(df)
-        U_df = pd.concat(df_lst)
+            self.VU = indicator_mat.sum(axis=0)
+            self.NU = freq_indicator_mat.sum(axis=0, dtype=int)
+        return {'VU': self.VU, 'NU': self.NU}
 
-        U_df = U_df.drop('freq', axis=1) \
-                .rename({'text_slice': 'k'}, axis=1) \
-                .groupby('k').sum().reset_index()
+    @property
+    def get_VU(self):
+        if not hasattr(self, 'VU'):
+            self.get_U()
+        return self.VU
 
-        self.U_df = U_df
-        return self.U_df
+    @property
+    def get_NU(self):
+        if not hasattr(self, 'NU'):
+            self.get_U()
+        return self.NU
 
-    def _plot_U(self, U_df, U_var='VU'):
-        U_col = U_var + '_k'
-        plt.scatter(U_df['k'], U_df[U_col], s=5)
-        self._plot_w_ref_line(U_df, 'k', U_col, ['running_median', 'ls'])
+    def _plot_U(self, U_var='VU'):
+        xs = [k for k, _ in self.get_text_slices()]
+        ys = self.get_U()[U_var]
+        plt.plot(xs, ys)
+
         plt.xlabel('k: text slice')
+        plt.ylabel(f'{U_var}(k):\nnumber of underdispersed tokens')
 
-        if U_var == 'VU':
-            plt.ylabel(f'VU(k):\nnumber of underdispersed types')
-        elif U_var == 'NU':
-            plt.ylabel(f'NU(k):\nnumber of underdispersed tokens')
-        else:
-            raise
+    def plot_VU(self):
+        self._plot_U()
 
-    def plot_VU(self, U_df):
-        self._plot_U(U_df)
+    def plot_NU(self):
+        self._plot_U(U_var='NU')
 
-    def plot_NU(self, U_df):
-        self._plot_U(U_df, U_var='NU')
+    def _plot_U_acf(self, U_var='VU', diff=None):
+        vals = self.get_U()[U_var]
 
-    def _plot_U_acf(self, U_df, U_var='VU'):
-        U_col = U_var + '_k'
+        if diff is not None:
+            for _ in range(diff):
+                vals = (vals - np.roll(vals, 1))[1:]
 
-        sm.graphics.tsa.plot_acf(U_df[U_col].values)
-        plt.xlabel('Lag')
-        plt.ylabel('ACF')
-        plt.title(f'Series: {U_var}')
+        fig = plt.figure(figsize=(12,8))
 
-    def plot_VU_acf(self, U_df):
-        self._plot_U_acf(U_df)
+        ax1 = fig.add_subplot(211)
+        fig = sm.graphics.tsa.plot_acf(vals, ax=ax1)
 
-    def plot_NU_acf(self, U_df):
-        self._plot_U_acf(U_df, U_var='NU')
+        ax2 = fig.add_subplot(212)
+        fig = sm.graphics.tsa.plot_pacf(vals, ax=ax2)
 
-    def get_Pr_df(self):
-        df_lst = []
-        for char in tqdm(self.char_freq): #
-            df = self.calc_char_freq_by_text_slice(char)
-            df['d_k_indicator'] = df.apply(lambda row: self.calc_d_k_indicator(char, row['freq']), axis=1)
-            df['d_k_f'] = df.apply(lambda row: row['d_k_indicator'] * row['freq'], axis=1)
-            df['char'] = char
-            df_lst.append(df)
-        Pr_df = pd.concat(df_lst)
+        plt.suptitle(f'Series: {U_var}')
 
-        # count
-        Pr_df = Pr_df[Pr_df['freq'] > 0]
-        Pr_df = Pr_df.groupby(['char', 'd_k_indicator']) \
-            .first('freq').reset_index().assign(first=True) \
-            .groupby(['text_slice', 'd_k_indicator']) \
-            .sum(['freq', 'first']) \
-            .drop('d_k_f', axis=1) \
-            .rename({'first': 'type', 'freq': 'token'}, axis=1)
-        # proportion
-        Pr_df = Pr_df.groupby(level=0) \
-            .apply(lambda x: x / x.sum()).reset_index() \
-            .rename({'type': 'Pr_type', 'token': 'Pr_token'}, axis=1) \
-            .merge(Pr_df.reset_index()) \
-            .rename({'text_slice': 'k'}, axis=1)
-        Pr_abridf = Pr_df[Pr_df['d_k_indicator'] == 1]
-        self.Pr_df = Pr_df
-        self.Pr_abridf = Pr_abridf
-        return self.Pr_abridf
+    def plot_VU_acf(self, diff=None):
+        self._plot_U_acf(diff=diff)
 
-    def _plot_Pr(self, Pr_abridf, var='type'):
-        col = f'Pr_{var}'
-        plt.scatter(Pr_abridf['k'], Pr_abridf[col], s=5)
+    def plot_NU_acf(self, diff=None):
+        self._plot_U_acf(U_var='NU', diff=diff)
+
+    def get_Pr(self):
+        # V = self.get_chunked_V
+        # V_diff = (V - np.roll(V, 1))
+        # V_diff[0] = V[0]
+
+        Uchars = set(self.get_underdisperse_chars)
+        Vset = set()
+        V_lst, U_lst = [], []
+        V_token_lst, U_token_lst = [], []
+        for _, text_slice in self.get_text_slices():
+            V = set(text_slice)
+
+            Vnew = V.difference(Vset)
+            Unew = Uchars.intersection(Vnew)
+            Vset = Vset | V
+
+            V_lst.append(len(Vnew))
+            U_lst.append(len(Unew))
+
+            V_token, U_token = 0, 0
+            for char in Vnew:
+                freq = ''.join(text_slice).count(char)
+                V_token += freq
+                if char in Unew:
+                    U_token += freq
+            V_token_lst.append(V_token)
+            U_token_lst.append(U_token)
+
+        self.Pr_type = np.array(U_lst) / np.array(V_lst)
+        self.Pr_token = np.array(U_token_lst) / np.array(V_token_lst)
+        return {'Pr_type': self.Pr_type, 'Pr_token': self.Pr_token}
+
+    @property
+    def get_Pr_type(self):
+        if not hasattr(self, 'Pr_type'):
+            self._get_Pr()
+        return self.Pr_type
+
+    @property
+    def get_Pr_token(self):
+        if not hasattr(self, 'Pr_token'):
+            self._get_Pr()
+        return self.Pr_token
+
+    def _plot_Pr(self, var='type'):
+        plt.plot([k for k in range(self.get_Pr()[f'Pr_{var}'].shape[0])], self.get_Pr()[f'Pr_{var}'])
+
         plt.xlabel('k: text slice')
         plt.ylabel(f'Pr(U,{var}):\nproportion of new underdispersed {var}s')
 
-    def plot_Pr_type(self, Pr_abridf):
-        self._plot_Pr(Pr_abridf)
+    def plot_Pr_type(self):
+        self._plot_Pr()
 
-    def plot_Pr_token(self, Pr_abridf):
-        self._plot_Pr(Pr_abridf, var='token')
+    def plot_Pr_token(self):
+        self._plot_Pr(var='token')
