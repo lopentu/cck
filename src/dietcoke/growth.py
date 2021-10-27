@@ -305,17 +305,34 @@ class Growth():
         if not hasattr(self, 'U'):
             k_cols = [col for col in self.get_disperse_df.columns if isinstance(col, int)]
             df = self.get_disperse_df[k_cols]
-
             freq_mat = np.array(df)
-            underdisperse_mat = np.array(self.get_disperse_df['is_underdispersed']).reshape(-1, 1)
-            threshold_mat = np.array(self.get_disperse_df['d_f_threshold']).reshape(-1, 1)
+            underdisperse_mat = np.array(self.get_disperse_df['is_underdispersed'])
 
-            indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat
+            threshold_mat = np.array(self.get_disperse_df['d_f_threshold']).reshape(-1, 1)
+            indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat.reshape(-1, 1)
             freq_indicator_mat = freq_mat * indicator_mat
 
             self.VU = indicator_mat.sum(axis=0)
             self.NU = freq_indicator_mat.sum(axis=0, dtype=int)
-        return {'VU': self.VU, 'NU': self.NU}
+
+            first_indices = np.argmax(freq_mat > 0, axis=1)
+            first_freq = [freq_mat[i,j] for i,j in zip(range(first_indices.shape[0]), first_indices)]
+
+            grouper = defaultdict(list)
+            for k, freq, underdisperse in zip(first_indices, first_freq, underdisperse_mat):
+                grouper[k].append([freq, underdisperse])
+
+            Pr_token = np.zeros(freq_mat.shape[1])
+            Pr_type = Pr_token.copy()
+            for k, data in grouper.items():
+                mat = np.array(data)
+                Pr_token[k] = sum(mat[:,0] * mat[:,1]) / sum(mat[:,0])
+                Pr_type[k] = sum((mat[:,0] > 0) * mat[:,1]) / sum(mat[:,0] > 0)
+
+            self.Pr_token = Pr_token
+            self.Pr_type = Pr_type
+
+        return {'VU': self.VU, 'NU': self.NU, 'Pr_token': self.Pr_token, 'Pr_type': self.Pr_type}
 
     @property
     def get_VU(self):
@@ -366,38 +383,6 @@ class Growth():
     def plot_NU_acf(self, diff=None):
         self._plot_U_acf(U_var='NU', diff=diff)
 
-    def get_Pr(self):
-        # V = self.get_chunked_V
-        # V_diff = (V - np.roll(V, 1))
-        # V_diff[0] = V[0]
-
-        Uchars = set(self.get_underdisperse_chars)
-        Vset = set()
-        V_lst, U_lst = [], []
-        V_token_lst, U_token_lst = [], []
-        for _, text_slice in self.get_text_slices():
-            V = set(text_slice)
-
-            Vnew = V.difference(Vset)
-            Unew = Uchars.intersection(Vnew)
-            Vset = Vset | V
-
-            V_lst.append(len(Vnew))
-            U_lst.append(len(Unew))
-
-            V_token, U_token = 0, 0
-            for char in Vnew:
-                freq = ''.join(text_slice).count(char)
-                V_token += freq
-                if char in Unew:
-                    U_token += freq
-            V_token_lst.append(V_token)
-            U_token_lst.append(U_token)
-
-        self.Pr_type = np.array(U_lst) / np.array(V_lst)
-        self.Pr_token = np.array(U_token_lst) / np.array(V_token_lst)
-        return {'Pr_type': self.Pr_type, 'Pr_token': self.Pr_token}
-
     @property
     def get_Pr_type(self):
         if not hasattr(self, 'Pr_type'):
@@ -411,7 +396,7 @@ class Growth():
         return self.Pr_token
 
     def _plot_Pr(self, var='type'):
-        plt.plot([k for k in range(self.get_Pr()[f'Pr_{var}'].shape[0])], self.get_Pr()[f'Pr_{var}'])
+        plt.plot([k for k in range(self.get_U()[f'Pr_{var}'].shape[0])], self.get_U()[f'Pr_{var}'])
 
         plt.xlabel('k: text slice')
         plt.ylabel(f'Pr(U,{var}):\nproportion of new underdispersed {var}s')
