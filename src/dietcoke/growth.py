@@ -305,8 +305,12 @@ class Growth():
         if not hasattr(self, 'U'):
             k_cols = [col for col in self.get_disperse_df.columns if isinstance(col, int)]
             df = self.get_disperse_df[k_cols]
+            df.index = self.get_disperse_df['char']
             freq_mat = np.array(df)
             underdisperse_mat = np.array(self.get_disperse_df['is_underdispersed'])
+
+            self.freq_df = df
+            self.freq_mat = freq_mat
 
             threshold_mat = np.array(self.get_disperse_df['d_f_threshold']).reshape(-1, 1)
             indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat.reshape(-1, 1)
@@ -332,7 +336,22 @@ class Growth():
             self.Pr_token = Pr_token
             self.Pr_type = Pr_type
 
-        return {'VU': self.VU, 'NU': self.NU, 'Pr_token': self.Pr_token, 'Pr_type': self.Pr_type}
+        return {
+            'freq_df': self.freq_df, 'freq_mat': self.freq_mat,
+            'VU': self.VU, 'NU': self.NU,
+            'Pr_token': self.Pr_token, 'Pr_type': self.Pr_type}
+
+    @property
+    def get_freq_df(self):
+        if not hasattr(self, 'freq_df'):
+            self.get_U()
+        return self.freq_df
+
+    @property
+    def get_freq_mat(self):
+        if not hasattr(self, 'freq_mat'):
+            self.get_U()
+        return self.freq_mat
 
     @property
     def get_VU(self):
