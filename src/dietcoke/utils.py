@@ -15,7 +15,7 @@ PAT_CLEANTEXT_REGEX = regex.compile(r'[^\p{Han}]')
 dynaspan_lst = '先秦,漢,魏晉南北,唐五代十國,宋元,明,清,民國'.split(',')
 
 def corpus_lst(dynaspan_lst=dynaspan_lst):
-    corpus_lst = [Corpus(dynaspan) for dynaspan in tqdm(dynaspan_lst)]
+    corpus_lst = [Corpus(dynaspan) for dynaspan in dynaspan_lst]
     return corpus_lst
 
 class Text:

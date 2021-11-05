@@ -44,6 +44,9 @@ def get_wiki_data(save_retrieved_data=False):
     # !pip install wikipedia
     # !pip install wordcloud
 
+    import os
+    import pickle
+    from tqdm.auto import tqdm
     import wptools
 
     fp_out = PATH_WIKI_DATA
@@ -75,7 +78,7 @@ def get_wiki_data(save_retrieved_data=False):
 
     if save_retrieved_data:
         with open(fp_out, 'wb') as f_out:
-            pickle.dump(f_out, retrieved_data)
+            pickle.dump(retrieved_data, f_out)
         print('File saved:', fp_out)
 
 def get_wiki_author_time(save_wiki_author_time=True):
@@ -100,6 +103,8 @@ def get_wiki_author_time(save_wiki_author_time=True):
                         life_timepoints = re.findall(PAT_TIMEPOINT, n)
                         if len(life_timepoints) > 0:
                             life.append(match2time(life_timepoints[0]))
+
+                    life = list(set(life))
                     if len(life) > 2:
                         print('Need to check time:', match.group(0), '->', life)
                     elif len(life) > 0:

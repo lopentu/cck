@@ -58,7 +58,7 @@ def main():
     start_time = time.time()
 
     ch_freq = Counter()
-    for fp in Path('tiers/dynasty_split/').glob('*.jsonl'):
+    for fp in Path('../../dynasty_split/').glob('*.jsonl'):
         print(fp)
         ch_freq += get_ch_freq_by_dyna(fp)
 

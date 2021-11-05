@@ -39,7 +39,8 @@ if PATH_AUTHOR_TIME.exists():
         author_life = dict(pickle.load(f))
         author_life = {cc.convert(k): v for k,v in author_life.items()}
 else:
-    raise('No mapping for author and time')
+    author_life = {}
+    print('No mapping for author and time')
 
 class Author():
     def __init__(self, name):
