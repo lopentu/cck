@@ -11,6 +11,7 @@ import pandas as pd
 import json
 import numpy as np
 import re
+from itertools import chain
 from scipy import sparse
 from tqdm.auto import tqdm
 
@@ -34,19 +35,29 @@ def get_urn_lookup():
     dzg_lookup = get_dzg_lookup()
 
     print('Creating urn lookup ...')
+    author_profile = pd.read_csv('../data/author_time/author_profile.csv')
+    author_profile = author_profile[['urn', 'title', 'mid_year', 'name']] \
+                        .rename({'name': 'author_norm'}, axis=1)
+    author_profile = author_profile[np.isnan(author_profile['mid_year']) == False]
+    author_profile['dzg'] = author_profile['urn'].apply(lambda x: dzg_lookup.get(x, np.nan))
+
     urn_lookup = {}
-    for corpus in tqdm(corpus_lst()):
-        corpus.read_corpus()
-        od_corpus = sorted(corpus.corpus, key=lambda x: Author(x.author).rep_year)
-        for line in od_corpus:
-            rep_year = Author(line.author).rep_year
-            if rep_year == -9999: continue
-            urn_lookup[line.urn] = {
-                'title': line.obj['title'],
-                'mid_year': rep_year,
-                'author_norm': Author(line.author).name_norm[0],
-                'dzg': dzg_lookup.get(line.urn, np.nan)
-            }
+    for _, row in author_profile.iterrows():
+        urn_lookup[row['urn']] = dict(row)
+
+    # urn_lookup = {}
+    # for corpus in tqdm(corpus_lst()):
+    #     corpus.read_corpus()
+    #     od_corpus = sorted(corpus.corpus, key=lambda x: Author(x.author).rep_year)
+    #     for line in od_corpus:
+    #         rep_year = Author(line.author).rep_year
+    #         if rep_year == -9999: continue
+    #         urn_lookup[line.urn] = {
+    #             'title': line.obj['title'],
+    #             'mid_year': rep_year,
+    #             'author_norm': Author(line.author).name_norm[0],
+    #             'dzg': dzg_lookup.get(line.urn, np.nan)
+    #         }
     urns = list(urn_lookup.keys())
 
     print('Done.\n-----')
@@ -56,7 +67,7 @@ def calc_chunked_freq(cur_corpus, fn_out):
     ldf_lst = []
     for line in cur_corpus:
         try:
-            growth_obj = Growth(''.join(line.text), 10000)
+            growth_obj = Growth(''.join(line.text), 100000)
             ldf = growth_obj.get_freq_df
             ldf = ldf.astype(int)
             ldf.columns = [f'{line.urn}_{col}' for col in ldf.columns]
@@ -91,8 +102,9 @@ def sample_vocab():
     random.seed(2021)
     vocab = Vocabulary('../data/dictionary.txt')
     chars_select = ["子","曰","者","於","為","有","其","人","一","而","以","也","不","之"]
-    vocab_n = [char for char in vocab.dictionary[:20000] if not char in chars_select]
-    chars = random.sample(vocab_n, k=1000-len(chars_select))
+    chars_select += list(chain.from_iterable([n.split(';') for n in ["布;燈", "鐘;錶;磐;篪", "槍;刀;劍;戟;炮", "鯨", "心", "城;池", "快;慢", "籽", "日;山;涉;踄", "大;小;高", "貫;毌;擐;關", "矢;誓", "歌;唱;和"]]))
+    #vocab_n = [char for char in vocab.dictionary[:20000] if not char in chars_select]
+    chars = []#random.sample(vocab_n, k=1000-len(chars_select))
     chars += chars_select
     chars_index = [vocab.encode(char) for char in chars]
     
@@ -105,21 +117,27 @@ def sample_vocab():
     return [chars, chars_index]
 
 def sample_freq_mat(chars, chars_index, urns_index):
+    random.seed(2021)
+
     print('Sampling freq mat ...')
     with open('../data/chunked_freq/text_slice_lookup.json', 'r', encoding='utf-8') as f:
         text_slice_lookup = json.load(f)
 
     dfs = {}
     for fp in tqdm(Path('.').glob('../data/chunked_freq/*.npz')):
-        mat = sparse.load_npz(fp)[chars_index,].todense()
+        mat = sparse.load_npz(fp).todense()[chars_index,]
         df = pd.DataFrame(mat)
         df.columns = text_slice_lookup[fp.stem]
 
-        urn_cols = [col for col in df.columns if col.split('_')[0] in urns_index]
+        durns_index = set([col.split('_')[0] for col in df.columns if col.split('_')[0] in urns_index])
+        durns_index = random.sample(durns_index, min(len(durns_index), 10))
+
+        urn_cols = [col for col in df.columns if col.split('_')[0] in durns_index]
         df = df[urn_cols]
 
         df['char'] = chars
-        df_long = pd.melt(df, id_vars=['char'], var_name='urn_textslice', value_name='raw_freq')
+        df['dynaspan'] = str(fp.stem).replace('chunked_freq_', '')
+        df_long = pd.melt(df, id_vars=['dynaspan', 'char'], var_name='urn_textslice', value_name='raw_freq')
         dfs[fp.stem] = df_long
     print('Done.\n-----')
     return dfs
