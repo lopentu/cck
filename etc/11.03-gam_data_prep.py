@@ -45,19 +45,6 @@ def get_urn_lookup():
     for _, row in author_profile.iterrows():
         urn_lookup[row['urn']] = dict(row)
 
-    # urn_lookup = {}
-    # for corpus in tqdm(corpus_lst()):
-    #     corpus.read_corpus()
-    #     od_corpus = sorted(corpus.corpus, key=lambda x: Author(x.author).rep_year)
-    #     for line in od_corpus:
-    #         rep_year = Author(line.author).rep_year
-    #         if rep_year == -9999: continue
-    #         urn_lookup[line.urn] = {
-    #             'title': line.obj['title'],
-    #             'mid_year': rep_year,
-    #             'author_norm': Author(line.author).name_norm[0],
-    #             'dzg': dzg_lookup.get(line.urn, np.nan)
-    #         }
     urns = list(urn_lookup.keys())
 
     print('Done.\n-----')
@@ -81,7 +68,6 @@ def calc_chunked_freq(cur_corpus, fn_out):
         .fillna(0).astype(int) \
         .reset_index() \
         .rename({'index': 'char'}, axis=1)
-    # cdf.to_csv(fn_out)
 
     vocab = Vocabulary('../data/dictionary.txt').dictionary
     chars_emp_df = pd.DataFrame({'char': vocab, 'col': [-1 for _ in range(len(vocab))]})
@@ -168,113 +154,55 @@ def add_meta(df, urn_lookup):
     return df_lst
 
 def main():
-    # for corpus in corpus_lst():
-    #     print(corpus.dynaspan)
-    #     corpus.read_corpus()
-    #     od_corpus = sorted(corpus.corpus, key=lambda x: Author(x.author).rep_year)
-    #     if corpus.dynaspan == '清':
-    #         for i in range(0, len(od_corpus), 300):
-    #             print(f'Processing split corpus at {i}, {i+300}')
-    #             calc_chunked_freq(od_corpus[i:i+300], f'chunked_freq_{corpus.dynaspan}_{str(i).zfill(4)}_{str(i+300).zfill(4)}.csv')
-    #     else:
-    #         calc_chunked_freq(od_corpus, f'chunked_freq_{corpus.dynaspan}.csv')
-    #     # break
-    #     # time.sleep(300)
+    skip_first_step = input('skip creating chunked frequencies?\n')
+    if skip_first_step == 'y':
+        pass
+    else:
+        for corpus in corpus_lst():
+            print(corpus.dynaspan)
+            corpus.read_corpus()
+            od_corpus = sorted(corpus.corpus, key=lambda x: Author(x.author).rep_year)
+            if corpus.dynaspan == '清':
+                for i in range(0, len(od_corpus), 300):
+                    print(f'Processing split corpus at {i}, {i+300}')
+                    calc_chunked_freq(od_corpus[i:i+300], f'chunked_freq_{corpus.dynaspan}_{str(i).zfill(4)}_{str(i+300).zfill(4)}.csv')
+            # time.sleep(300)
+            else:
+                calc_chunked_freq(od_corpus, f'chunked_freq_{corpus.dynaspan}.csv')
 
-    # save_npz_from_csv()
-    # save_text_slice_lookup()
+    next_step = input('continue data transformation?\n')
+    if next_step == 'y':
+        script_start_time = time.time()
+        global out_folder
+        out_folder = Path(datetime.today().strftime('%Y%m%d-%H%M%S'))
+        out_folder.mkdir(exist_ok=True)
 
-    script_start_time = time.time()
-    global out_folder
-    out_folder = Path(datetime.today().strftime('%Y%m%d-%H%M%S'))
-    out_folder.mkdir(exist_ok=True)
+        urns, urn_lookup = get_urn_lookup()
 
-    urns, urn_lookup = get_urn_lookup()
+        chars, chars_index = sample_vocab()
+        dfs = sample_freq_mat(chars, chars_index, urns_index=urns)
 
-    chars, chars_index = sample_vocab()
-    dfs = sample_freq_mat(chars, chars_index, urns_index=urns)
+        df = combine_dfs(dfs)
+        df_lst = add_meta(df, urn_lookup)
 
-    df = combine_dfs(dfs)
-    df_lst = add_meta(df, urn_lookup)
+        print('Concating dfs ...')
+        df_lst2 = []
+        for i in tqdm(range(0, len(df_lst), 10)):
+            df_lst2.append(pd.concat(df_lst[i:i+10]))
+        
+        df = pd.concat(df_lst2)
+        df = df.sort_values('mid_year')
 
-    print('Concating dfs ...')
-    df_lst2 = []
-    for i in tqdm(range(0, len(df_lst), 10)):
-        df_lst2.append(pd.concat(df_lst[i:i+10]))
-    
-    df = pd.concat(df_lst2)
-    df = df.sort_values('mid_year')
+        print('Saving gam_df.parquet')
+        df.to_parquet(out_folder / 'gam_df.parquet')
+        print('Done.\n-----')
 
-    print('Saving gam_df.parquet')
-    df.to_parquet(out_folder / 'gam_df.parquet')
-    print('Done.\n-----')
+        test_df = pd.read_parquet(out_folder / 'gam_df.parquet')
+        print('Shape of gam_df.parquet:', test_df.shape)
+        print(test_df.head())
+        print(test_df.sample(n=10))
 
-    test_df = pd.read_parquet(out_folder / 'gam_df.parquet')
-    print('Shape of gam_df.parquet:', test_df.shape)
-    print(test_df.head())
-    print(test_df.sample(n=10))
-
-    print('Script time:', time.time() - script_start_time)
+        print('Script time:', time.time() - script_start_time)
 
 if __name__ == '__main__':
     main()
-
-# def save_npz_from_csv():
-#     def dfchunk2mat(fp):
-#         df_lst = pd.read_csv(fp, chunksize=1000)
-        
-#         # df = pd.concat(df_lst, ignore_index=True)
-#         cmat = None
-#         for df in tqdm(df_lst):
-#             df = df.drop('Unnamed: 0', axis=1).rename({'index': 'char'}, axis=1)
-#             df = chars_emp_df.merge(df, how='left') \
-#                     .drop(['char', 'col'], axis=1) \
-#                     .fillna(0)
-
-#             mat = sparse.csr_matrix(df, dtype=int)
-#             if cmat is None:
-#                 cmat = mat
-#             else:
-#                 cmat += mat
-#         print('Done reading df chunks and creating a combined matrix ...', cmat.shape)
-#         return cmat
-
-#     def df2mat(fp):
-#         df = pd.read_csv(fp) \
-#                 .drop('Unnamed: 0', axis=1).rename({'index': 'char'}, axis=1)
-#         print('Done reading the df ...')
-
-#         df = chars_emp_df.merge(df, how='left') \
-#                 .drop(['char', 'col'], axis=1) \
-#                 .fillna(0)
-#         mat = sparse.csr_matrix(df, dtype=int)
-#         print('Done creating the matrix ...', mat.shape)
-#         return mat
-
-#     dic = Vocabulary('../data/dictionary.txt')
-#     vocab = dic.dictionary
-#     chars_emp_df = pd.DataFrame({'char': vocab, 'col': [-1 for _ in range(len(vocab))]})
-
-#     for fp in Path('.').glob('*.csv'):
-#         print(fp)
-#         if re.search('宋元|明', str(fp)):
-#             mat = dfchunk2mat(fp)
-#         else:
-#             mat = df2mat(fp)
-
-#         start_time = time.time()
-#         sparse.save_npz(fp.stem + '.npz', mat)
-#         print('Time elapsed for saving matrix:', time.time() - start_time)
-#         time.sleep(120)
-
-# def save_text_slice_lookup():
-#     import json
-
-#     text_slice_lookup = {}
-#     for fp in Path('.').glob('*.csv'):
-#         with open(fp, 'r') as f:
-#             line = f.readline()
-#         text_slice_lookup[fp.stem] = line.split(',')[2:]
-
-#     with open('text_slice_lookup.json', 'w', encoding='utf-8') as f:
-#         json.dump(text_slice_lookup, f, ensure_ascii=False, indent=2)
