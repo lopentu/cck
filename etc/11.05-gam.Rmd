@@ -1,0 +1,393 @@
+```{r, message=FALSE}
+library(showtext)
+showtext_auto(enable = TRUE)
+font_add("自訂字體", "/Users/mac/Documents/in_sync_mac/in_sync_documents/fonts/HanaMinA.ttf")
+```
+
+```{r, message=FALSE}
+library(tidyverse)
+library(mgcv)
+library(psych)
+
+set.seed(1)
+label <- "/Users/mac/Documents/GitHub/GIL/CCKF/dietcoke/data/chunked_freq/20211110-111217-蔣2005/"
+```
+
+### Data preparation
+```{r, message=FALSE}
+library(arrow)
+
+fp <- paste0(label, "gam_df.parquet")
+if(file.exists(fp)){df <- read_parquet(fp)}
+df$text_slice <- as.numeric(df$text_slice)
+```
+
+- To check whether there are missing values in the `mid_year` column
+```{r}
+any(is.na(df$mid_year)) == FALSE
+all(!is.na(df$mid_year)) == TRUE
+"wb114254" %in% df$urn == FALSE
+```
+
+- How many texts (identified by `urn`) are included?
+```{r}
+length(unique(df$urn))
+```
+
+- Filtering out some more characters
+
+```
+# Over-dispersed characters from the results of vocabulary growth curve
+["子","曰","者","於","為","有","其","人","一","而","以","也","不","之"] 
+
+# Subsets of characters from 蔣(2005)
+["布;燈", "鐘;錶;磐;篪", "槍;刀;劍;戟;炮", "鯨", "心", "城;池", "快;慢", "籽", "日;山;涉;踄", "大;小;高", "貫;毌;擐;關", "矢;誓", "歌;唱;和"]
+
+# Over-dispersed mid-frequency characters 
+['避', '聚', '助', '縱', '殊', '假', '戒', '竟', '辨', '委', '屈', '負', '違', '仰', '庫', '畏', '屢', '惜', '逐', '符', '側', '覺', '貫', '稽', '稍']
+# Under-dispersed mid-frequency characters
+['瑭', '尿', '酳', '皝', '嚐', '緞', '痘', '礼', '楽', '与', '鄩', '爹', '獘', '𣗳', '𧰼', '𫠦', '淂', '縀', '媽', '𡻕', '啊', '捌', '啥', '㭍', '叁']
+```
+
+```{r}
+chars <- unique(df$char)
+char_df <- data.frame(char=chars, char_id=1:length(chars))
+df <- left_join(df, char_df)
+```
+
+### Cleaning
+```{r}
+kdf <- df %>%
+  select(mid_year, urn, text_slice) %>%
+  distinct() %>%
+  arrange(mid_year, urn, text_slice) %>%
+  mutate(k=row_number())
+
+dynaspan_levels <- c("先秦", "漢", "魏晉南北", "唐五代十國", "宋元", "明", "清", "民國")
+dynaspan_yearto_levels <- c(-221, 220, 589, 1125, 1368, 1644, 1911, 1949)
+dynaspan_df <- data.frame(
+  dynaspan=dynaspan_levels,
+  dynaspan_yearto=dynaspan_yearto_levels
+)
+
+df <- left_join(df, kdf) %>%
+  left_join(dynaspan_df)
+
+df$dynaspan <- factor(df$dynaspan, levels=dynaspan_levels)
+```
+
+```{r}
+var(df$raw_freq)
+mean(df$raw_freq)
+
+ppois(0, mean(df$raw_freq)) < mean(df$raw_freq == 0)
+
+df %>% filter(raw_freq == 0) %>% nrow() / nrow(df)
+
+df$logfreq <- log(df$raw_freq+1)
+
+ggplot(df, aes(raw_freq)) + geom_histogram(binwidth=1)
+ggplot(df, aes(logfreq)) + geom_histogram()
+
+par(mfrow=c(2,1))
+plot(density(df$raw_freq))
+plot(density(df$logfreq))
+```
+
+```{r}
+par(mfrow=c(2,1))
+
+mid_year_distribution <- df %>%
+  select(mid_year, urn, text_slice) %>%
+  distinct() %>%
+  group_by(mid_year) %>%
+  count() %>%
+  arrange(desc(n))
+
+plot(density(mid_year_distribution$mid_year))
+abline(v=dynaspan_yearto_levels, col="lightblue")
+text(dynaspan_yearto_levels, 0.000025,  dynaspan_levels,
+     cex=0.65, pos=2,col="lightblue") 
+rug(mid_year_distribution$mid_year, ticksize=-0.1, col="blue") # side=3
+
+mid_year_distribution$mid_year_scaled <- scale(mid_year_distribution$mid_year)
+hist(mid_year_distribution$mid_year_scaled)
+
+df %>% select(dynaspan, k, urn) %>% distinct() %>%
+  group_by(dynaspan) %>%
+  summarize(`Number of texts`=length(unique(urn)), `Number of text slices`=length(k))
+```
+```
+library(readr)
+write_csv(df, "gam_df2.csv")
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+df %>%
+  keep(is.numeric) %>%
+  lowerCor()
+
+#df %>%
+#  keep(is.numeric) %>%
+#  cor()
+```
+
+![Dispersion of characters ordered by frequency rank and text slice of 100K characters](../data/chunked_freq/dispersion_heatmap.png)
+![Dispersion of characters ordered by frequency rank and text slice of 100K characters](../data/chunked_freq/dispersion_heatmap_vline.png)
+
+```
+# culmulative number of text slices
+[12, 687, 1868, 4094, 12537, 20026, 45804, 46060]
+```
+
+```{r}
+df %>%
+  filter(raw_freq>0) %>%
+  ggplot(aes(k, char_id)) +
+  geom_point(size=0.5) +
+  theme_minimal() +
+  scale_y_continuous(breaks=1:length(unique(df$char)), labels=paste0(1:length(chars), "_", chars)) +
+  labs(x="Text slice", y="Character")
+```
+
+### clustering
+```{r}
+folder <- paste0(label, "gam_models")
+models <- lapply(list.files(folder, full=TRUE), readRDS)
+```
+
+```{r}
+gam_df <- data.frame(
+    formula=lapply(models, function(x){
+    formula <- as.character(x$formula)
+    formula <- paste(formula[[2]], formula[[1]], formula[[3]])
+    return(formula)
+  }) %>% unlist(),
+  AIC=lapply(models, AIC) %>% unlist(),
+  BIC=lapply(models, BIC) %>% unlist()
+) %>%
+  mutate(model_id=row_number()) %>%
+  arrange(AIC, formula) %>%
+  select(model_id, AIC, BIC, formula); gam_df
+
+coef_mats <- lapply(models, function(x){
+  coefs <- coef(x)
+  coefs <- coefs[2:length(coefs)]
+  coef_mat <- matrix(coefs, nrow=length(chars))
+  return(coef_mat)
+})
+
+coef_dfs <- lapply(coef_mats, function(x){
+  coef_df <- data.frame(x)
+  rownames(coef_df) <- paste0(1:length(chars), "_", chars)
+  return(coef_df)
+})
+
+model <- models[[6]]
+
+model$family
+model$formula
+
+coef_mat <- coef_mats[[6]]
+coef_df <- coef_dfs[[6]]
+```
+
+#### Distance (Dissimilarity)
+```{r}
+library(factoextra)
+res.dist <- get_dist(coef_df, stand=FALSE, method = "euclidean")
+
+fviz_dist(res.dist, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+#### K-means
+```{r}
+for(method in c("silhouette", "wss", "gap_stat")){
+  print(fviz_nbclust(coef_mat, kmeans, method=method))
+}
+```
+
+```{r}
+km.res <- kmeans(coef_df, 2, nstart = 25)
+fviz_cluster(km.res, data = coef_df,
+             palette = "jco", ggtheme = theme_minimal(), geom="text")
+```
+
+#### PAM
+```{r}
+library(cluster)
+
+pam.res <- pam(coef_df, 2)
+fviz_cluster(pam.res,
+             palette = "jco", ggtheme = theme_minimal(), geom="text")
+```
+
+#### hierarchical clustering
+```{r}
+res.hc <- hclust(dist(coef_df), method="ward.D2")
+
+fviz_dend(res.hc, k = 2,
+          cex = 0.5,
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE,
+          rect = TRUE
+          )
+```
+
+```{r}
+res.hc <- coef_df %>%
+  eclust("hclust", k = 20, graph = FALSE)
+
+fviz_dend(res.hc, 
+          cex = 0.5, palette = "jco", rect = TRUE)
+
+fviz_silhouette(res.hc)
+
+# Silhouette width of observations
+sil <- res.hc$silinfo$widths[, 1:3]
+
+# Objects with negative silhouette
+neg_sil_index <- which(sil[, 'sil_width'] < 0)
+sil[neg_sil_index, , drop = FALSE]
+```
+
+#### fuzzy clustering
+```{r}
+res.fanny <- fanny(coef_df, k=2)
+
+fviz_cluster(res.fanny,
+             palette = "jco", ggtheme = theme_minimal())
+
+fviz_silhouette(res.fanny,
+                palette = "jco", ggtheme = theme_minimal())
+```
+
+#### density-based clustering
+```{r}
+library(fpc)
+
+db <- fpc::dbscan(coef_df, eps = 5, MinPts = 2)
+fviz_cluster(db, data = coef_df, stand = FALSE,
+             geom = "point", palette = "jco", ggtheme = theme_classic())
+fviz_cluster(db, data = coef_df, stand = FALSE,
+             geom = "text", palette = "jco", ggtheme = theme_classic())
+
+dbscan::kNNdistplot(coef_df, k =  10)
+```
+
+##### ordered dissimilarity image (ODI)
+```{r}
+gradient.color <- list(low = "steelblue",  high = "white")
+
+coef_mat %>%
+  get_clust_tendency(n = 2, gradient = gradient.color)
+```
+
+Source: https://www.datanovia.com/en/blog/types-of-clustering-methods-overview-and-quick-start-r-code/
+
+```{r}
+library(lattice)
+
+df <- df %>%
+  separate(dzg, into=c("dzg_lev1", "dzg_lev2"), sep="/", remove=FALSE) %>%
+  mutate(char_label=paste0(char_id, "_", char), char=char_id)
+
+df$char <- factor(df$char)
+df$author_norm <- factor(df$author_norm)
+df$dzg <- factor(df$dzg)
+df$dzg_lev1 <- factor(df$dzg_lev1)
+
+df$fit <- predict.gam(model, df)
+
+new_df <- df %>%
+  group_by(char, char_id) %>%
+  summarize(fano=var(logfreq, na.rm=TRUE)/mean(logfreq, na.rm=TRUE))
+
+new_df %>% arrange(desc(fano))
+
+fano_quantiles <- quantile(new_df$fano, probs=c(0.1, 0.9), na.rm=TRUE)
+indices_low <- new_df %>% filter(fano < fano_quantiles[1]) %>% pull(char_id)
+indices_high <- new_df %>% filter(fano > fano_quantiles[2]) %>% pull(char_id)
+```
+
+```{r}
+par(mfrow=c(2,3))
+for(i in indices_low){
+  plot(model, select=i, main=chars[i])
+}
+```
+```{r}
+par(mfrow=c(2,3))
+for(i in indices_high){
+  plot(model, select=i, main=chars[i])
+}
+```
+```{r}
+pdf("freq_plot.pdf",he=10,wi=10,family="GB1")
+options(plot.repr.height=12, plot.repr.width=12)
+xyplot(logfreq ~ k|char_label, data=df, type="l")
+dev.off()
+```
+
+```{r}
+model$formula
+plot_df <- df %>% select(char, char_id, char_label, author_norm, dzg_lev1, k, fit)
+
+pdf("gam_plot.pdf",he=10,wi=10,family="GB1")
+
+ts = sapply(unique(df$dynaspan), function(v) max(df[df$dynaspan==v,"k"]))
+fn = function(...) {
+    panel.xyplot(..., type = "l")
+    panel.abline(v = ts, lty=2, lwd=0.5)
+    }
+xyplot(fit~k|char_label,data=df, panel=fn)
+
+dev.off()
+```
+
+
+```{r}
+bursty_df <- df %>%
+  group_by(char, char_id) %>%
+  summarize(burstiness=(logfreq/sum(logfreq, na.rm=TRUE))-(1/n())) %>%
+  mutate(is_bursty_period=burstiness > 0) %>%
+  arrange(desc(burstiness)) %>%
+  group_by(char, char_id) %>%
+  summarize(burstiness_median=median(burstiness)) %>%
+  arrange(desc(burstiness_median))
+
+bursty_chars <- bursty_df %>% select(char_id) %>% distinct() %>% head(6) %>% pull(char_id)
+
+par(mfrow=c(2,3))
+for(i in bursty_chars){
+  plot(model, select=i, main=chars[i])
+}
+```
+---
+```{r}
+set.seed(1)
+
+author_profile <- read_csv("/Users/mac/Documents/GitHub/GIL/CCKF/dietcoke/data/author_time/author_profile.csv") %>%
+  filter(!is.na(mid_year)) %>%
+  mutate(mid_year_grp=mid_year %/% 100) %>%
+  group_by(mid_year_grp) %>%
+  slice_sample(n=3)
+
+par(mfrow=c(2,1))
+hist(author_profile$mid_year)
+
+plot(density(author_profile$mid_year))
+abline(v=dynaspan_yearto_levels, col="lightblue")
+text(dynaspan_yearto_levels, 0.000025,  dynaspan_levels,
+     cex=0.65, pos=2,col="lightblue") 
+rug(author_profile$mid_year, ticksize=-0.1, col="blue")
+
+df %>% select(dynaspan, k, urn) %>% distinct() %>%
+  group_by(dynaspan) %>%
+  summarize(`Number of texts`=length(unique(urn)), `Number of text slices`=length(k))
+```
