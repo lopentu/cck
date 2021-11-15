@@ -313,7 +313,7 @@ class Growth():
             self.freq_mat = freq_mat
 
             threshold_mat = np.array(self.get_disperse_df['d_f_threshold']).reshape(-1, 1)
-            indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat.reshape(-1, 1)
+            indicator_mat = (threshold_mat >= freq_mat) * underdisperse_mat.reshape(-1, 1) #
             freq_indicator_mat = freq_mat * indicator_mat
 
             self.VU = indicator_mat.sum(axis=0)

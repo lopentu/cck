@@ -87,10 +87,11 @@ def sample_vocab():
     print('Sampling characters from vocabulary ...')
     random.seed(2021)
     vocab = Vocabulary('../data/dictionary.txt')
-    chars_select = ["子","曰","者","於","為","有","其","人","一","而","以","也","不","之"]
-    chars_select += list(chain.from_iterable([n.split(';') for n in ["布;燈", "鐘;錶;磐;篪", "槍;刀;劍;戟;炮", "鯨", "心", "城;池", "快;慢", "籽", "日;山;涉;踄", "大;小;高", "貫;毌;擐;關", "矢;誓", "歌;唱;和"]]))
-    #vocab_n = [char for char in vocab.dictionary[:20000] if not char in chars_select]
+    # chars_select = ["子","曰","者","於","為","有","其","人","一","而","以","也","不","之"]
+    # chars_select += list(chain.from_iterable([n.split(';') for n in ["布;燈", "鐘;錶;磐;篪", "槍;刀;劍;戟;炮", "鯨", "心", "城;池", "快;慢", "籽", "日;山;涉;踄", "大;小;高", "貫;毌;擐;關", "矢;誓", "歌;唱;和"]]))
+    # #vocab_n = [char for char in vocab.dictionary[:20000] if not char in chars_select]
     chars = []#random.sample(vocab_n, k=1000-len(chars_select))
+    chars_select = ['避', '聚', '助', '縱', '殊', '假', '戒', '竟', '辨', '委', '屈', '負', '違', '仰', '庫', '畏', '屢', '惜', '逐', '符', '側', '覺', '貫', '稽', '稍'] + ['瑭', '尿', '酳', '皝', '嚐', '緞', '痘', '礼', '楽', '与', '鄩', '爹', '獘', '𣗳', '𧰼', '𫠦', '淂', '縀', '媽', '𡻕', '啊', '捌', '啥', '㭍', '叁']
     chars += chars_select
     chars_index = [vocab.encode(char) for char in chars]
     

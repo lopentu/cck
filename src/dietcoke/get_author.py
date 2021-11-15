@@ -3,36 +3,36 @@ from itertools import chain, groupby
 import os
 import pickle
 import re
-from .utils import corpus_lst, dynaspan_lst
-from .author import Author
+from .utils import corpus_lst, dynaspan_lst, save_file, read_file
+from .author import Name
 
 PAT_ANONYM = '^$|\[*佚名\]*'
+PAT_TIMEPOINT = '((前*)(\d{1,4})(年|世紀|世纪))'
+# {{bd|1609年|6月21日|1672年|1月23日|catIdx=W吴}}
+PAT_WIKITEXT_LIFE = '\{\{' + '(bd|BD)([^}]+)' + '(\}\})'
+PAT_INFOBOX_YEAR = '.*(（|\()(\d+)年.*(）|\)).*'
 
 PATH_NAMES_CLEAN = '../data/author_time/names_clean.txt'
 PATH_WIKI_DATA = '../data/author_time/wiki_retrieved_data.pkl'
-PATH_WIKI_AUTHOR_TIME = '../data/author_time/wiki_author_time.pkl'
-
-def read_wiki_author_time():
-    with open(PATH_WIKI_AUTHOR_TIME, 'rb') as f:
-        author_life = pickle.load(f)
-    return author_life
+PATH_WIKI_AUTHOR_TIME = '../data/author_time/wiki_author_time.json'
 
 def get_all_authors(save_names_clean=False):
     authors_tier1, authors_tier12 = [], []
     for corpus in tqdm(corpus_lst(dynaspan_lst + ['tier1'])):
         corpus.read_corpus()
         authors = [line.author for line in corpus.corpus]
-        if corpus.dynaspan == 'tier1':
+
+        if corpus.dynaspan == 'tier1': #
             authors_tier1 = authors
         else:
             authors_tier12 += authors
 
-    authors_uni = [Author(author).name_clean for author in set(authors_tier12)]
+    authors_uni = [Name(author).name_clean for author in set(authors_tier12)]
     authors_uni = sorted(list(chain.from_iterable(authors_uni)))
 
     if save_names_clean:
         fp_out = PATH_NAMES_CLEAN
-        with open(PATH_NAMES_CLEAN, 'w', encoding='utf-8') as f:
+        with open(fp_out, 'w', encoding='utf-8') as f:
             for author in authors_uni:
                 f.write(author + '\n')
         print('File saved:', fp_out)
@@ -45,13 +45,10 @@ def get_wiki_data(save_retrieved_data=False):
     # !pip install wordcloud
 
     import os
-    import pickle
     from tqdm.auto import tqdm
     import wptools
 
-    fp_out = PATH_WIKI_DATA
-
-    if not os.path.exists(fp_out):
+    if not os.path.exists(PATH_WIKI_DATA):
         f = open(PATH_NAMES_CLEAN)
 
         retrieved_data = {}
@@ -77,67 +74,65 @@ def get_wiki_data(save_retrieved_data=False):
                 print(e)
 
     if save_retrieved_data:
-        with open(fp_out, 'wb') as f_out:
-            pickle.dump(retrieved_data, f_out)
-        print('File saved:', fp_out)
+        save_file(retrieved_data, PATH_WIKI_DATA)
 
 def get_wiki_author_time(save_wiki_author_time=True):
-    # {{bd|1609年|6月21日|1672年|1月23日|catIdx=W吴}}
-    PAT_WIKITEXT_LIFE = '\{\{' + '(bd|BD)([^}]+)' + '(\}\})'
-    PAT_INFOBOX_YEAR = '.*(（|\()(\d+)年.*(）|\)).*'
-    PAT_TIMEPOINT = '((前*)(\d{1,4})(年|世紀|世纪))'
-
-    with open(PATH_WIKI_DATA, 'rb') as f_in:
-        retrieved_data = pickle.load(f_in)
+    retrieved_data = read_file(PATH_WIKI_DATA)
 
     author_life = []
     for author, data in retrieved_data.items():
-        match = None
         result = None
         if data['wikitext'] is not None:
             try:
-                match = re.search(PAT_WIKITEXT_LIFE, data['wikitext'])
-                if match:
-                    life = []
-                    for n in match.group(0).split('|'):
-                        life_timepoints = re.findall(PAT_TIMEPOINT, n)
-                        if len(life_timepoints) > 0:
-                            life.append(match2time(life_timepoints[0]))
-
-                    life = list(set(life))
-                    if len(life) > 2:
-                        print('Need to check time:', match.group(0), '->', life)
-                    elif len(life) > 0:
-                        result = life
-                        author_life.append([Author(author).name_norm[0], life])
+                result = wikitext2life(data['wikitext'])
             except Exception as e:
                 print(e)
 
-        if match == None:
-            if data['infobox'] is not None:
-                life_year = [None, None]
-                for idx, key in enumerate(['birth_date', 'death_date']):
-                    if key in data['infobox']:
-                        life_year[idx] = int(re.sub(PAT_INFOBOX_YEAR, r'\2', data['infobox'][key]))
-                life = [n for n in life_year if n != None]
-                if len(life) > 0:
-                    result = life
+        if (data['infobox'] is not None) \
+            and (result is None):
+                result = infobox2life(data['infobox'])
 
         if result is not None:
-            author_life.append([Author(author).name_norm[0], result])
+            author_life.append([Name(author).normalize(in_simplified=False)[0], result])
 
-    author_life = sorted(author_life)
-    author_life = list(k for k,_ in groupby(author_life))
-    author_life = sorted(author_life, key=lambda x: x[1][0])
+    author_life = dict(sorted(author_life, key=lambda x: x[1][0]))
 
     if save_wiki_author_time:
-        with open(PATH_WIKI_AUTHOR_TIME, 'wb') as f:
-            pickle.dump(author_life, f)
+        save_file(author_life, PATH_WIKI_AUTHOR_TIME)
 
     print('Count of retrieved data:', len(retrieved_data))
     print('Count of author time info:', len(author_life))
 
-def match2time(match):
+def wikitext2life(wikitext):
+    result = None
+    match = re.search(PAT_WIKITEXT_LIFE, wikitext)
+    if match:
+        life = []
+        for wikitext_frag in match.group(0).split('|'):
+            wikitext_timepoints = re.findall(PAT_TIMEPOINT, wikitext_frag)
+            if len(wikitext_timepoints) > 0:
+                life_timepoint = match2year(wikitext_timepoints[0]) #
+                life.append(life_timepoint)
+
+        life = sorted(list(set(life)))
+        if len(life) > 2:
+            print('Need to check time:', match.group(0), '->', life)
+        elif len(life) > 0:
+            result = life
+    return result
+
+def infobox2life(infobox):
+    result = None
+    life = []
+    for key in ['birth_date', 'death_date']:
+        if key in infobox:
+            life_timepoint = int(re.sub(PAT_INFOBOX_YEAR, r'\2', infobox[key]))
+            life.append(life_timepoint)
+    if len(life) > 0:
+        result = life
+    return result
+
+def match2year(match):
     # match = ('前1世紀', '前', '1', '世紀')
     year = int(match[2])
     if match[3] in ['世紀', '世纪']:
