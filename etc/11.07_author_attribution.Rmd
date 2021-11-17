@@ -1,0 +1,65 @@
+```{r, message=FALSE}
+library(languageR)
+library(tidyverse)
+library(reshape2)
+library(factoextra)
+library(FactoMineR)
+
+library(showtext)
+showtext_auto(enable = TRUE)
+font_add("自訂字體", "/Users/mac/Documents/in_sync_mac/in_sync_documents/fonts/HanaMinA.ttf")
+```
+
+```{r}
+data <- read.csv("../data/chunked_freq/20211117-111751_蔣2005/gam_df2.csv") %>%
+  separate(dzg, into=c("dzg_lev1", "dzg_lev2"), sep="/", remove=F) %>%
+  pivot_wider(id_cols=c("k", "author_norm", "dzg_lev1", "mid_year"),
+              names_from="char", values_from="raw_freq") %>%
+  arrange(k)
+
+data$author_norm <- factor(data$author_norm, levels=unique(data$author_norm))
+
+pca.data <- PCA(data[, 4:(ncol(data))], graph = FALSE)
+factoextra::fviz_pca_biplot(X = pca.data,
+                            fill.ind = data$author_norm, col.ind = 'black',
+                            pointshape = 21, pointsize = 1.5,
+                            geom.ind = 'point', repel = T,
+                            geom.var = FALSE )
+```
+
+```{r}
+data <- read.csv("../data/chunked_freq/20211117-111821_functions/gam_df2.csv") %>%
+  separate(dzg, into=c("dzg_lev1", "dzg_lev2"), sep="/", remove=F) %>%
+  pivot_wider(id_cols=c("k", "author_norm", "dzg_lev1", "mid_year"),
+              names_from="char", values_from="raw_freq") %>%
+  arrange(k)
+
+data$author_norm <- factor(data$author_norm, levels=unique(data$author_norm))
+
+pca.data <- PCA(data[, 4:(ncol(data))], graph = FALSE)
+factoextra::fviz_pca_biplot(X = pca.data,
+                            fill.ind = data$author_norm, col.ind = 'black',
+                            pointshape = 21, pointsize = 1.5,
+                            geom.ind = 'point', repel = T,
+                            geom.var = FALSE )
+```
+
+```
+data.pr = prcomp(data[, 4:(ncol(data))])
+names(data.pr)
+
+round(data.pr$sdev, 4)
+
+#summary(data.pr)
+
+props = round((data.pr$sdev**2/sum(data.pr$sdev**2)), 3)
+props[1:6]
+
+barplot(props, col = as.numeric(props > 0.05),
+        xlab = "principal components", ylab = "proportion of variance explained")
+abline(h = 0.05)
+
+# plot(data.pr)
+
+#data.pr$x[1:nrow(data.pr$x),1:3]
+```
