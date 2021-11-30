@@ -14,7 +14,7 @@ names_excluded = (names_excluded + cc.convert(names_excluded)).split(';')
 PAT_names_excluded = '|'.join([re.sub('\[|\]', '', n) for n in names_excluded])
 PAT_names_excluded = '(' + PAT_names_excluded + ')'
 
-roles = '輯;撰;傳;述;奉敕譯;註;注;編;著;輯註;箋;章句;疏'
+roles = '輯;撰;傳;述;奉敕譯;註;注;編;著;輯註;校輯;校刊;箋;章句;疏'
 roles = (roles + cc.convert(roles)).split(';')
 PAT_roles = '(' + '|'.join(roles) + ')'
 # alt: 注註
@@ -40,13 +40,19 @@ if PATH_NAMES_NORM.exists():
         for name_ori in ori_names:
             name_lookup[name_ori] = norm_name
 
-def get_author_time_map(merge_data=False):
+def get_author_time_map(merge_data=True):
     wiki_data = read_file(PATH_WIKI_AUTHOR_TIME)
     if merge_data:
         result = {}
         for fp in ['author_time_map.json', '../notes/post_edit.json']:
             result = {**result, **read_file(fp)}
-        result = {**result, **wiki_data}
+        result = {**wiki_data, **result}
+
+        for name in read_file('../notes/post_edit.json').keys():
+            if len(name.split('(')) >= 2:
+                name_del = name.split('(')[0]
+                if name_del in result:
+                    del result[name_del]
     else:
         result = wiki_data
     return {cc.convert(k): v for k,v in result.items()}
@@ -108,7 +114,7 @@ class Author(Name):
             author_profile = []
             for name_norm in self.name_norm:
                 life_timepoints = author_time_map.get(name_norm, None)
-                if life_timepoints is not None:
+                if (life_timepoints is not None) and (len(life_timepoints) > 0):
                     birth_year, death_year = np.min(life_timepoints), np.max(life_timepoints)
 
                     if birth_year == death_year:

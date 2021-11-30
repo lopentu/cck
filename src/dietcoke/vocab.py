@@ -1,4 +1,10 @@
-
+PATH_func_chars = '../notes/functions.txt'
+with open(PATH_func_chars, 'r', encoding='utf-8') as f:
+    func_chars = set()
+    for line in f.readlines():
+        line = line.strip().split(',')[0]
+        if line.startswith('#') or line == '': continue
+        func_chars |= set(line)
 class Vocabulary:
     def __init__(self, dict_path):
         f = open(dict_path, 'r', encoding='utf-8')
@@ -20,3 +26,9 @@ class Vocabulary:
 
     def decode(self, idx):
         return self.dictionary[idx]
+
+    @property
+    def get_func_chars(self):
+        if not hasattr(self, 'func_char'):
+            self.func_chars = sorted([(char, self.encode(char)) for char in func_chars], key=lambda x: x[1])
+        return self.func_chars
