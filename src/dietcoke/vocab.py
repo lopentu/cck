@@ -32,3 +32,23 @@ class Vocabulary:
         if not hasattr(self, 'func_char'):
             self.func_chars = sorted([(char, self.encode(char)) for char in func_chars], key=lambda x: x[1])
         return self.func_chars
+      
+## use in resmodel (40.02)
+class DummyVocab:
+    def __init__(self):
+        self.vocab = {}
+
+    def __contains__(self, tok):
+        return tok in self.vocab
+
+    def __len__(self):
+        return len(self.vocab)
+
+    def get_index(self, tok):
+        if tok not in self.vocab:
+            self.vocab[tok] = len(self.vocab)
+
+        return self.vocab[tok]
+
+    def get_token(self, idx):
+        return list(self.vocab.keys())[idx]
